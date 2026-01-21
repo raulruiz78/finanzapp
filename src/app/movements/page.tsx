@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "rruiz/lib/supabase";
+import { supabase } from "@/lib/supabase";
 
 type Account = { id: string; name: string; current_balance: number };
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE"; bucket: "FIXED" | "VARIABLE" | "TRANSFER" | "OTHER" };
@@ -16,8 +16,8 @@ type TxRow = {
   category_id: string;
   transfer_group_id: string | null;
   created_at: string;
-  accounts?: { name: string } | null;
-  categories?: { name: string; direction: string; bucket: string } | null;
+  accounts?: { name: string }[] | null;
+  categories?: { name: string; direction: string; bucket: string }[] | null;
 };
 
 function currentYM() {
@@ -140,7 +140,7 @@ export default function MovementsPage() {
     let expense = 0;
 
     for (const t of txs) {
-      const dir = t.categories?.direction;
+      const dir = t.categories?.[0]?.direction;
       if (dir === "INCOME") income += Number(t.amount);
       else if (dir === "EXPENSE") expense += Number(t.amount);
     }
@@ -271,10 +271,10 @@ export default function MovementsPage() {
             </thead>
             <tbody>
               {txs.map((t) => {
-                const catName = t.categories?.name ?? "?";
-                const accName = t.accounts?.name ?? "?";
+                const catName = t.categories?.[0]?.name ?? "?";
+                const accName = t.accounts?.[0]?.name ?? "?";
                 const isTransfer = !!t.transfer_group_id;
-                const isIncome = t.categories?.direction === "INCOME";
+                const isIncome = t.categories?.[0]?.direction === "INCOME";
 
                 return (
                   <tr key={t.id}>

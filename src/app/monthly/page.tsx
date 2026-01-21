@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "rruiz/lib/supabase";
+import { supabase } from "@/lib/supabase";
 
 type Account = { id: string; name: string; current_balance: number };
 type Category = {

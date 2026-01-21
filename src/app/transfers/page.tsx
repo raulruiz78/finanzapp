@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "rruiz/lib/supabase";
+import { supabase } from "@/lib/supabase";
 
 type Account = { id: string; name: string };
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE"; bucket: "FIXED" | "VARIABLE" | "TRANSFER" | "OTHER" };
@@ -16,8 +16,8 @@ type TxRow = {
   category_id: string;
   transfer_group_id: string | null;
   created_at: string;
-  accounts?: { name: string } | null;
-  categories?: { name: string; direction: string; bucket: string } | null;
+  accounts?: { name: string }[] | null;
+  categories?: { name: string; direction: string; bucket: string }[] | null;
 };
 
 function currentYM() {
@@ -214,11 +214,11 @@ export default function TransfersPage() {
     }
 
     const rows = Array.from(map.entries()).map(([groupId, items]) => {
-      const out = items.find((x) => x.categories?.direction === "EXPENSE");
-      const inn = items.find((x) => x.categories?.direction === "INCOME");
+      const out = items.find((x) => x.categories?.[0]?.direction === "EXPENSE");
+      const inn = items.find((x) => x.categories?.[0]?.direction === "INCOME");
 
-      const from = out?.accounts?.name ?? "¿origen?";
-      const to = inn?.accounts?.name ?? "¿destino?";
+      const from = out?.accounts?.[0]?.name ?? "¿origen?";
+      const to = inn?.accounts?.[0]?.name ?? "¿destino?";
       const amount = Number(out?.amount ?? inn?.amount ?? 0);
       const date = out?.tx_date ?? inn?.tx_date ?? "";
       const desc = out?.description ?? inn?.description ?? "Transferencia";
