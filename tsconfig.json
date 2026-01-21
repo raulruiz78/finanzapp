@@ -1,6 +1,5 @@
 {
   "compilerOptions": {
-<<<<<<< HEAD
     "target": "ES2022",
     "lib": [
       "dom",
@@ -8,11 +7,6 @@
       "es2022"
     ],
     "allowJs": false,
-=======
-    "target": "ES2017",
-    "lib": ["dom", "dom.iterable", "esnext"],
-    "allowJs": true,
->>>>>>> pr-1
     "skipLibCheck": true,
     "strict": true,
     "noEmit": true,
@@ -29,40 +23,19 @@
       }
     ],
     "paths": {
-<<<<<<< HEAD
-<<<<<<< HEAD
       "@/*": [
-        "./*"
+        "./src/*"
       ]
-    },
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ]
-=======
-      "rruiz/*": ["./src/*"]
-=======
-      "@/*": ["./src/*"]
->>>>>>> pr-3
     }
->>>>>>> pr-1
   },
   "include": [
     "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx",
-<<<<<<< HEAD
-    ".next/types/**/*.ts"
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"
   ]
-=======
-    ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts",
-    "**/*.mts"
-  ],
-  "exclude": ["node_modules"]
->>>>>>> pr-1
 }
