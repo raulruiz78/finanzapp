@@ -106,7 +106,16 @@ export default function SignInPage() {
         <section className={styles.shell}>
           <div className={styles.hero}>
             <div className={styles.brand}>
-              <div className={styles.logo} aria-hidden />
+              <div className={styles.logo} aria-hidden>
+                <img
+                  className={styles.logoImg}
+                  src="/icono.png"
+                  alt=""
+                  onError={(e) => {
+                    e.currentTarget.src = "/icon-192.png";
+                  }}
+                />
+              </div>
               <div>
                 <h1 className={styles.title}>FinanzApp</h1>
                 <p className={styles.subtitle}>Crea tu cuenta</p>
@@ -138,7 +147,16 @@ export default function SignInPage() {
       <section className={styles.shell}>
         <div className={styles.hero}>
           <div className={styles.brand}>
-            <div className={styles.logo} aria-hidden />
+            <div className={styles.logo} aria-hidden>
+              <img
+                className={styles.logoImg}
+                src="/icono.png"
+                alt=""
+                onError={(e) => {
+                  e.currentTarget.src = "/icon-192.png";
+                }}
+              />
+            </div>
             <div>
               <h1 className={styles.title}>Crear cuenta</h1>
               <p className={styles.subtitle}>Empieza a ordenar tus finanzas</p>

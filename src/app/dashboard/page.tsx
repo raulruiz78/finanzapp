@@ -279,7 +279,16 @@ export default function Dashboard() {
     <main className={styles.page}>
       <header className={styles.topbar}>
         <div className={styles.brand}>
-          <div className={styles.logo} aria-hidden="true" />
+          <div className={styles.logo} aria-hidden="true">
+            <img
+              className={styles.logoImg}
+              src="/icono.png"
+              alt=""
+              onError={(e) => {
+                e.currentTarget.src = "/icon-192.png";
+              }}
+            />
+          </div>
           <div className={styles.brandText}>
             <h1 className={styles.appName}>FinanzApp</h1>
             <p className={styles.kicker}>Mes {ym} · {email}</p>

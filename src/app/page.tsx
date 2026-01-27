@@ -50,7 +50,16 @@ export default function Home() {
         <section className={styles.shell}>
           <div className={styles.hero}>
             <div className={styles.brand}>
-              <div className={styles.logo} aria-hidden />
+              <div className={styles.logo} aria-hidden>
+                <img
+                  className={styles.logoImg}
+                  src="/icono.png"
+                  alt=""
+                  onError={(e) => {
+                    e.currentTarget.src = "/icon-192.png";
+                  }}
+                />
+              </div>
               <div>
                 <h1 className={styles.title}>FinanzApp</h1>
                 <p className={styles.subtitle}>Tu gestor simple de finanzas</p>
@@ -80,7 +89,16 @@ export default function Home() {
       <section className={styles.shell}>
         <div className={styles.hero}>
           <div className={styles.brand}>
-            <div className={styles.logo} aria-hidden />
+            <div className={styles.logo} aria-hidden>
+              <img
+                className={styles.logoImg}
+                src="/icono.png"
+                alt=""
+                onError={(e) => {
+                  e.currentTarget.src = "/icon-192.png";
+                }}
+              />
+            </div>
             <div>
               <h1 className={styles.title}>FinanzApp</h1>
               <p className={styles.subtitle}>Tus finanzas claras, en 1 minuto al día</p>
