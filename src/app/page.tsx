@@ -6,6 +6,7 @@ import { supabase, supabaseConfigured } from "@/lib/supabase";
 export default function Home() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState<"" | "login" | "register" | "reset">("");
 
   useEffect(() => {
     if (!supabase) return;
@@ -17,16 +18,37 @@ export default function Home() {
 
   async function onRegister() {
     if (!supabase) return;
-    const { error } = await supabase.auth.signUp({ email, password });
+    setBusy("register");
+    const emailRedirectTo = `${window.location.origin}/auth/callback`;
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { emailRedirectTo },
+    });
+    setBusy("");
     if (error) return alert(error.message);
-    alert("Usuario creado. Ahora haz login.");
+    alert("Usuario creado. Revisa tu email para confirmar la cuenta.");
   }
 
   async function onLogin() {
     if (!supabase) return;
+    setBusy("login");
     const { error } = await supabase.auth.signInWithPassword({ email, password });
+    setBusy("");
     if (error) return alert(error.message);
     window.location.href = "/dashboard";
+  }
+
+  async function onForgotPassword() {
+    if (!supabase) return;
+    if (!email.trim()) return alert("Escribe tu email primero.");
+
+    setBusy("reset");
+    const redirectTo = `${window.location.origin}/auth/reset`;
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo });
+    setBusy("");
+    if (error) return alert(error.message);
+    alert("Te he enviado un email para recuperar la contraseña. Abre el enlace desde el móvil/PC.");
   }
 
   if (!supabaseConfigured) {
@@ -78,13 +100,26 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=...`}
           style={{ padding: 10, borderRadius: 10, border: "1px solid #ddd" }}
         />
 
-        <button onClick={onLogin} style={{ padding: 10, borderRadius: 10 }}>
-          Login
+        <button onClick={onLogin} style={{ padding: 10, borderRadius: 10 }} disabled={busy === "login"}>
+          {busy === "login" ? "Entrando…" : "Login"}
         </button>
-        <button onClick={onRegister} style={{ padding: 10, borderRadius: 10 }}>
-          Crear cuenta
+
+        <button onClick={onRegister} style={{ padding: 10, borderRadius: 10 }} disabled={busy === "register"}>
+          {busy === "register" ? "Creando…" : "Crear cuenta"}
+        </button>
+
+        <button
+          onClick={onForgotPassword}
+          style={{ padding: 10, borderRadius: 10, background: "transparent", border: "1px solid #ddd" }}
+          disabled={busy === "reset"}
+        >
+          {busy === "reset" ? "Enviando email…" : "He olvidado mi contraseña"}
         </button>
       </div>
+
+      <p style={{ marginTop: 12, opacity: 0.7, fontSize: 13 }}>
+        Nota: en Supabase debes añadir <code>/auth/callback</code> y <code>/auth/reset</code> a tus Redirect URLs.
+      </p>
     </main>
   );
 }
