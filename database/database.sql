@@ -46,6 +46,119 @@ begin
 end
 $$;
 
+-- ==========================================
+-- MULTI-USER SAFETY (RLS)
+-- Ensures each user only sees/edits their own data.
+-- ==========================================
+
+-- Defaults (so inserts can omit user_id if desired)
+alter table public.accounts alter column user_id set default auth.uid();
+alter table public.categories alter column user_id set default auth.uid();
+alter table public.transactions alter column user_id set default auth.uid();
+alter table public.month_balances alter column user_id set default auth.uid();
+
+-- Enable RLS
+alter table public.accounts enable row level security;
+alter table public.categories enable row level security;
+alter table public.transactions enable row level security;
+alter table public.month_balances enable row level security;
+
+-- Policies: accounts
+do $$
+begin
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='accounts' and policyname='accounts_select_own') then
+    create policy accounts_select_own on public.accounts for select to authenticated using (user_id = auth.uid());
+  end if;
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='accounts' and policyname='accounts_insert_own') then
+    create policy accounts_insert_own on public.accounts for insert to authenticated with check (user_id = auth.uid());
+  end if;
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='accounts' and policyname='accounts_update_own') then
+    create policy accounts_update_own on public.accounts for update to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+  end if;
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='accounts' and policyname='accounts_delete_own') then
+    create policy accounts_delete_own on public.accounts for delete to authenticated using (user_id = auth.uid());
+  end if;
+end
+$$;
+
+-- Policies: categories
+do $$
+begin
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='categories' and policyname='categories_select_own') then
+    create policy categories_select_own on public.categories for select to authenticated using (user_id = auth.uid());
+  end if;
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='categories' and policyname='categories_insert_own') then
+    create policy categories_insert_own on public.categories for insert to authenticated with check (user_id = auth.uid());
+  end if;
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='categories' and policyname='categories_update_own') then
+    create policy categories_update_own on public.categories for update to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+  end if;
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='categories' and policyname='categories_delete_own') then
+    create policy categories_delete_own on public.categories for delete to authenticated using (user_id = auth.uid());
+  end if;
+end
+$$;
+
+-- Policies: transactions (also enforce that referenced account/category belong to the same user)
+do $$
+begin
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='transactions' and policyname='transactions_select_own') then
+    create policy transactions_select_own on public.transactions for select to authenticated using (user_id = auth.uid());
+  end if;
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='transactions' and policyname='transactions_insert_own') then
+    create policy transactions_insert_own on public.transactions
+      for insert to authenticated
+      with check (
+        user_id = auth.uid()
+        and exists (select 1 from public.accounts a where a.id = account_id and a.user_id = auth.uid())
+        and exists (select 1 from public.categories c where c.id = category_id and c.user_id = auth.uid())
+      );
+  end if;
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='transactions' and policyname='transactions_update_own') then
+    create policy transactions_update_own on public.transactions
+      for update to authenticated
+      using (user_id = auth.uid())
+      with check (
+        user_id = auth.uid()
+        and exists (select 1 from public.accounts a where a.id = account_id and a.user_id = auth.uid())
+        and exists (select 1 from public.categories c where c.id = category_id and c.user_id = auth.uid())
+      );
+  end if;
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='transactions' and policyname='transactions_delete_own') then
+    create policy transactions_delete_own on public.transactions for delete to authenticated using (user_id = auth.uid());
+  end if;
+end
+$$;
+
+-- Policies: month_balances
+do $$
+begin
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='month_balances' and policyname='month_balances_select_own') then
+    create policy month_balances_select_own on public.month_balances for select to authenticated using (user_id = auth.uid());
+  end if;
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='month_balances' and policyname='month_balances_insert_own') then
+    create policy month_balances_insert_own on public.month_balances
+      for insert to authenticated
+      with check (
+        user_id = auth.uid()
+        and exists (select 1 from public.accounts a where a.id = account_id and a.user_id = auth.uid())
+      );
+  end if;
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='month_balances' and policyname='month_balances_update_own') then
+    create policy month_balances_update_own on public.month_balances
+      for update to authenticated
+      using (user_id = auth.uid())
+      with check (
+        user_id = auth.uid()
+        and exists (select 1 from public.accounts a where a.id = account_id and a.user_id = auth.uid())
+      );
+  end if;
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='month_balances' and policyname='month_balances_delete_own') then
+    create policy month_balances_delete_own on public.month_balances for delete to authenticated using (user_id = auth.uid());
+  end if;
+end
+$$;
+
 commit;
 
 -- Optional: force PostgREST schema reload (usually auto-refreshes, but can help)

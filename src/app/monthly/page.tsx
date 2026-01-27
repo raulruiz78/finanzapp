@@ -56,9 +56,15 @@ export default function MonthlyPage() {
 
   async function loadBase() {
     if (!supabase) return;
+
+    const { data: session } = await supabase.auth.getSession();
+    const userId = session?.session?.user?.id;
+    if (!userId) return;
+
     const { data: acc, error: accErr } = await supabase
       .from("accounts")
       .select("id,name,current_balance")
+      .eq("user_id", userId)
       .order("created_at");
     if (accErr) alert(accErr.message);
 
@@ -69,6 +75,10 @@ export default function MonthlyPage() {
     if (!isValidYM(ym)) return;
     if (!supabase) return;
 
+    const { data: session } = await supabase.auth.getSession();
+    const userId = session?.session?.user?.id;
+    if (!userId) return;
+
     const p = prevYM(ym);
 
     const [{ data: t, error: txErr }, { data: b, error: bErr }, { data: pb, error: pbErr }] =
@@ -76,9 +86,18 @@ export default function MonthlyPage() {
         supabase
           .from("transactions")
           .select("id,ym,account_id,category_id,amount,description,transfer_group_id,categories:categories(name,direction,amount)")
+          .eq("user_id", userId)
           .eq("ym", ym),
-        supabase.from("month_balances").select("id,account_id,ym,opening_balance,closing_balance,locked").eq("ym", ym),
-        supabase.from("month_balances").select("id,account_id,ym,opening_balance,closing_balance,locked").eq("ym", p),
+        supabase
+          .from("month_balances")
+          .select("id,account_id,ym,opening_balance,closing_balance,locked")
+          .eq("user_id", userId)
+          .eq("ym", ym),
+        supabase
+          .from("month_balances")
+          .select("id,account_id,ym,opening_balance,closing_balance,locked")
+          .eq("user_id", userId)
+          .eq("ym", p),
       ]);
 
     if (txErr) alert(humanizeSupabaseSchemaError(txErr.message) ?? txErr.message);
@@ -182,6 +201,10 @@ export default function MonthlyPage() {
   async function upsertOpening(accountId: string, opening: number) {
     if (!isValidYM(ym)) return alert("Mes inválido");
     if (!supabase) return;
+
+    const { data: session } = await supabase.auth.getSession();
+    const userId = session?.session?.user?.id;
+    if (!userId) return alert("No autenticado");
     const current = balanceByAccount.get(accountId);
 
     if (current?.locked) {
@@ -190,6 +213,7 @@ export default function MonthlyPage() {
     }
 
     const payload = {
+      user_id: userId,
       ym,
       account_id: accountId,
       opening_balance: opening,
@@ -211,6 +235,7 @@ export default function MonthlyPage() {
       const { data: existing } = await supabase
         .from("month_balances")
         .select("id,locked")
+        .eq("user_id", userId)
         .eq("ym", ym)
         .eq("account_id", accountId)
         .maybeSingle();
@@ -218,10 +243,16 @@ export default function MonthlyPage() {
       if (existing?.locked) return alert("Mes cerrado (locked).");
 
       if (existing?.id) {
-        const u = await supabase.from("month_balances").update({ opening_balance: opening }).eq("id", existing.id);
+        const u = await supabase
+          .from("month_balances")
+          .update({ opening_balance: opening })
+          .eq("user_id", userId)
+          .eq("id", existing.id);
         if (u.error) return alert(u.error.message);
       } else {
-        const i = await supabase.from("month_balances").insert({ ym, account_id: accountId, opening_balance: opening });
+        const i = await supabase
+          .from("month_balances")
+          .insert({ user_id: userId, ym, account_id: accountId, opening_balance: opening });
         if (i.error) return alert(i.error.message);
       }
     }
@@ -238,6 +269,10 @@ export default function MonthlyPage() {
 
   async function closeMonth(accountId: string) {
     if (!supabase) return;
+
+    const { data: session } = await supabase.auth.getSession();
+    const userId = session?.session?.user?.id;
+    if (!userId) return alert("No autenticado");
     const row = summary.find((s) => s.accountId === accountId);
     if (!row) return;
 
@@ -258,6 +293,7 @@ export default function MonthlyPage() {
     const { data: mb } = await supabase
       .from("month_balances")
       .select("id")
+      .eq("user_id", userId)
       .eq("ym", ym)
       .eq("account_id", accountId)
       .maybeSingle();
@@ -271,11 +307,13 @@ export default function MonthlyPage() {
           locked: true,
           updated_at: new Date().toISOString(),
         })
+        .eq("user_id", userId)
         .eq("id", mb.id);
 
       if (error) return alert(error.message);
     } else {
       const { error } = await supabase.from("month_balances").insert({
+        user_id: userId,
         ym,
         account_id: accountId,
         opening_balance: openingToSave,
@@ -291,6 +329,10 @@ export default function MonthlyPage() {
 
   async function unlockMonth(accountId: string) {
     if (!supabase) return;
+
+    const { data: session } = await supabase.auth.getSession();
+    const userId = session?.session?.user?.id;
+    if (!userId) return alert("No autenticado");
     const mb = balanceByAccount.get(accountId);
     if (!mb) return alert("No hay registro del mes. (Cierra el mes o define un inicial primero).");
     if (!confirm(`¿Desbloquear mes ${ym} para esta cuenta?`)) return;
@@ -298,6 +340,7 @@ export default function MonthlyPage() {
     const { error } = await supabase
       .from("month_balances")
       .update({ locked: false })
+      .eq("user_id", userId)
       .eq("id", mb.id);
 
     if (error) alert(error.message);

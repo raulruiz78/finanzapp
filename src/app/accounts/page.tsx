@@ -26,7 +26,11 @@ export default function AccountsPage() {
     if (!userId) return;
 
     const [{ data: acc, error: accErr }, { data: tx, error: txErr }] = await Promise.all([
-      supabase.from("accounts").select("id,name,current_balance").order("created_at"),
+      supabase
+        .from("accounts")
+        .select("id,name,current_balance")
+        .eq("user_id", userId)
+        .order("created_at"),
       supabase
         .from("transactions")
         .select("account_id,amount,categories:categories(direction)")
@@ -75,7 +79,11 @@ export default function AccountsPage() {
 
     if (!supabase) return;
 
-    const { error } = await supabase.from("accounts").delete().eq("id", id);
+    const { data: session } = await supabase.auth.getSession();
+    const userId = session?.session?.user?.id;
+    if (!userId) return alert("No autenticado");
+
+    const { error } = await supabase.from("accounts").delete().eq("user_id", userId).eq("id", id);
     if (error) alert(error.message);
     else loadAccounts();
   }

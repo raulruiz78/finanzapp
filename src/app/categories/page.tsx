@@ -73,9 +73,15 @@ export default function CategoriesPage() {
 
   async function load() {
     if (!supabase) return;
+
+    const { data: session } = await supabase.auth.getSession();
+    const userId = session?.session?.user?.id;
+    if (!userId) return;
+
     const { data, error } = await supabase
       .from("categories")
       .select("*")
+      .eq("user_id", userId)
       .order("created_at");
 
     if (error) alert(error.message);
@@ -134,6 +140,10 @@ export default function CategoriesPage() {
 
     if (!supabase) return;
 
+    const { data: session } = await supabase.auth.getSession();
+    const userId = session?.session?.user?.id;
+    if (!userId) return alert("No autenticado");
+
     const payload: any = {
       name: editName.trim(),
       direction: editDirection,
@@ -143,6 +153,7 @@ export default function CategoriesPage() {
     const { error } = await supabase
       .from("categories")
       .update(payload)
+      .eq("user_id", userId)
       .eq("id", editingId);
 
     if (error) return alert(error.message);

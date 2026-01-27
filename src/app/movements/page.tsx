@@ -82,9 +82,22 @@ export default function MovementsPage() {
 
   async function loadBase() {
     if (!supabase) return;
+
+    const { data: session } = await supabase.auth.getSession();
+    const userId = session?.session?.user?.id;
+    if (!userId) return;
+
     const [{ data: acc, error: accErr }, { data: cat, error: catErr }] = await Promise.all([
-      supabase.from("accounts").select("id,name,current_balance").order("created_at"),
-      supabase.from("categories").select("id,name,direction,amount").order("created_at"),
+      supabase
+        .from("accounts")
+        .select("id,name,current_balance")
+        .eq("user_id", userId)
+        .order("created_at"),
+      supabase
+        .from("categories")
+        .select("id,name,direction,amount")
+        .eq("user_id", userId)
+        .order("created_at"),
     ]);
 
     if (accErr) alert(accErr.message);

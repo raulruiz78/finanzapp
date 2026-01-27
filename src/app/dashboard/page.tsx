@@ -80,7 +80,11 @@ export default function Dashboard() {
 
       const [{ data: acc, error: accErr }, { data: allTx, error: allTxErr }, { data: mTx, error: mTxErr }] =
         await Promise.all([
-          supabase.from("accounts").select("id,name,current_balance").order("created_at"),
+          supabase
+            .from("accounts")
+            .select("id,name,current_balance")
+            .eq("user_id", userId)
+            .order("created_at"),
           supabase
             .from("transactions")
             .select("account_id,amount,categories:categories(direction)")
