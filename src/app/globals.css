@@ -172,6 +172,18 @@ input::placeholder {
   color: var(--text-secondary);
 }
 
+/* Remove number input spinners (money fields should feel like direct entry) */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 /* Links */
 a {
   color: var(--primary);

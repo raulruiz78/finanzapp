@@ -105,6 +105,59 @@
   letter-spacing: -0.02em;
 }
 
+.rangeRow {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.rangeLabel {
+  margin: 0;
+  font-size: 0.9rem;
+  opacity: 0.9;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.rangeControls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.dateInput {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.10);
+  color: white;
+  outline: none;
+}
+
+.dateInput:focus {
+  border-color: rgba(255, 255, 255, 0.40);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.14);
+}
+
+.rangeHint {
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.88);
+  opacity: 0.9;
+}
+
+.rangeValue {
+  margin-top: 8px;
+  font-size: 1.5rem;
+  font-weight: 900;
+  color: white;
+}
+
 .grid {
   display: grid;
   grid-template-columns: 1.2fr 0.8fr;

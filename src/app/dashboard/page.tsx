@@ -31,6 +31,19 @@ function currentYM() {
   return `${d.getFullYear()}-${mm}`;
 }
 
+function isoDate(d: Date) {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function minusOneMonth(date: Date) {
+  const d = new Date(date);
+  d.setMonth(d.getMonth() - 1);
+  return d;
+}
+
 function safeDateLabel(txDate?: string | null, createdAt?: string | null) {
   const d = txDate ? new Date(txDate) : createdAt ? new Date(createdAt) : null;
   if (!d || Number.isNaN(d.getTime())) return "";
@@ -48,9 +61,11 @@ export default function Dashboard() {
   const [name, setName] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [ym] = useState(currentYM());
+  const [savingsFrom, setSavingsFrom] = useState(() => isoDate(minusOneMonth(new Date())));
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [deltasAll, setDeltasAll] = useState<Record<string, number>>({});
   const [monthTxs, setMonthTxs] = useState<Tx[]>([]);
+  const [allTxs, setAllTxs] = useState<Tx[]>([]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -88,7 +103,7 @@ export default function Dashboard() {
             .order("created_at"),
           supabase
             .from("transactions")
-            .select("account_id,amount,categories:categories(direction)")
+            .select("account_id,amount,ym,tx_date,created_at,transfer_group_id,categories:categories(direction)")
             .eq("user_id", userId),
           supabase
             .from("transactions")
@@ -117,8 +132,9 @@ export default function Dashboard() {
         fallbackName;
       if (!cancelled) setName(profileName);
 
+      const all = (((allTx as unknown) as Tx[]) || []);
       const deltas: Record<string, number> = {};
-      for (const t of (((allTx as unknown) as Tx[]) || [])) {
+      for (const t of all) {
         const cat = Array.isArray(t.categories) ? t.categories[0] : t.categories;
         const dir = cat?.direction;
         const amt = Number(t.amount) || 0;
@@ -129,6 +145,7 @@ export default function Dashboard() {
       if (!cancelled) {
         setDeltasAll(deltas);
         setMonthTxs((mTx as Tx[]) || []);
+        setAllTxs(all);
       }
       if (!cancelled) setLoading(false);
     })();
@@ -211,6 +228,36 @@ export default function Dashboard() {
     };
   }, [monthTxs]);
 
+  const rangeStats = useMemo(() => {
+    const from = new Date(`${savingsFrom}T00:00:00`);
+    const to = new Date();
+
+    let income = 0;
+    let expenses = 0;
+
+    for (const t of allTxs) {
+      const d = t.tx_date ? new Date(t.tx_date) : t.created_at ? new Date(t.created_at) : null;
+      if (!d || Number.isNaN(d.getTime())) continue;
+      if (d < from || d > to) continue;
+
+      const cat = Array.isArray(t.categories) ? t.categories[0] : t.categories;
+      const dir = cat?.direction;
+      const amt = Number(t.amount) || 0;
+      const isTransfer = Boolean(t.transfer_group_id);
+      if (isTransfer) continue;
+
+      if (dir === "INCOME") income += amt;
+      else if (dir === "EXPENSE") expenses += amt;
+    }
+
+    return {
+      income,
+      expenses,
+      savings: income - expenses,
+      toLabel: isoDate(to),
+    };
+  }, [allTxs, savingsFrom]);
+
   const savingsRate = useMemo(() => {
     if (!monthStats.income) return 0;
     return Math.max(0, Math.min(1, monthStats.savings / monthStats.income));
@@ -282,6 +329,26 @@ export default function Dashboard() {
             <div className={styles.meter} aria-hidden="true">
               <div className={styles.meterFill} style={{ width: `${Math.round((1 - savingsRate) * 100)}%` }} />
             </div>
+          </div>
+        </div>
+
+        <div className={styles.rangeRow}>
+          <div>
+            <p className={styles.rangeLabel}>Ahorro desde</p>
+            <div className={styles.rangeControls}>
+              <input
+                className={styles.dateInput}
+                type="date"
+                value={savingsFrom}
+                max={isoDate(new Date())}
+                onChange={(e) => setSavingsFrom(e.target.value)}
+              />
+              <span className={styles.rangeHint}>hasta {loading ? "…" : rangeStats.toLabel}</span>
+            </div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <p className={styles.rangeLabel}>Ahorro (rango)</p>
+            <div className={styles.rangeValue}>{loading ? "…" : formatEUR(rangeStats.savings)}</div>
           </div>
         </div>
       </section>
