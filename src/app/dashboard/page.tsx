@@ -6,14 +6,23 @@ import { useRequireSupabaseConfigured } from "@/lib/useRequireSupabaseConfigured
 import { humanizeSupabaseSchemaError } from "@/lib/supabaseErrorMessage";
 import { formatEUR } from "@/lib/format";
 import type { Account, CategoryJoin, OneOrMany } from "@/lib/types";
+import styles from "./page.module.css";
 
 type Tx = {
   account_id: string;
   amount: number;
   ym: string;
+  tx_date?: string | null;
+  created_at?: string | null;
   description?: string | null;
   transfer_group_id?: string | null;
   categories?: OneOrMany<CategoryJoin> | null;
+};
+
+type Profile = {
+  first_name?: string | null;
+  last_name?: string | null;
+  full_name?: string | null;
 };
 
 function currentYM() {
@@ -22,41 +31,21 @@ function currentYM() {
   return `${d.getFullYear()}-${mm}`;
 }
 
-function Card({
-  title,
-  subtitle,
-  children,
-  accent,
-}: {
-  title: string;
-  subtitle?: string;
-  children: React.ReactNode;
-  accent?: string;
-}) {
-  return (
-    <section
-      style={{
-        background: "var(--surface)",
-        border: `2px solid ${accent ?? "var(--border)"}`,
-        borderRadius: "1rem",
-        padding: "1.5rem",
-        boxShadow: "var(--shadow)",
-      }}
-    >
-      <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", marginBottom: "0.75rem" }}>
-        <div>
-          <h3 style={{ marginBottom: "0.25rem" }}>{title}</h3>
-          {subtitle ? <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: "0.9rem" }}>{subtitle}</p> : null}
-        </div>
-      </div>
-      {children}
-    </section>
-  );
+function safeDateLabel(txDate?: string | null, createdAt?: string | null) {
+  const d = txDate ? new Date(txDate) : createdAt ? new Date(createdAt) : null;
+  if (!d || Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, { day: "2-digit", month: "short" });
+}
+
+function displayNameFromEmail(email: string) {
+  const part = String(email || "").split("@")[0] || "";
+  return part ? part.replace(/[._-]+/g, " ") : "";
 }
 
 export default function Dashboard() {
   const configured = useRequireSupabaseConfigured("/");
   const [email, setEmail] = useState<string>("");
+  const [name, setName] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [ym] = useState(currentYM());
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -76,9 +65,21 @@ export default function Dashboard() {
       }
 
       const userId = data.session.user.id;
-      if (!cancelled) setEmail(data.session.user.email ?? "");
+      const sessionEmail = data.session.user.email ?? "";
+      if (!cancelled) setEmail(sessionEmail);
 
-      const [{ data: acc, error: accErr }, { data: allTx, error: allTxErr }, { data: mTx, error: mTxErr }] =
+      const meta = (data.session.user.user_metadata ?? {}) as Record<string, unknown>;
+      const metaFirst = typeof meta.first_name === "string" ? meta.first_name : "";
+      const metaFull = typeof meta.full_name === "string" ? meta.full_name : "";
+      const fallbackName = metaFirst || metaFull || displayNameFromEmail(sessionEmail);
+      if (!cancelled) setName(fallbackName);
+
+      const [
+        { data: acc, error: accErr },
+        { data: allTx, error: allTxErr },
+        { data: mTx, error: mTxErr },
+        { data: profile, error: profileErr },
+      ] =
         await Promise.all([
           supabase
             .from("accounts")
@@ -91,16 +92,30 @@ export default function Dashboard() {
             .eq("user_id", userId),
           supabase
             .from("transactions")
-            .select("account_id,amount,ym,description,transfer_group_id,categories:categories(name,direction,amount)")
+            .select(
+              "account_id,amount,ym,tx_date,created_at,description,transfer_group_id,categories:categories(name,direction,amount)"
+            )
             .eq("user_id", userId)
             .eq("ym", ym),
+          supabase.from("profiles").select("first_name,last_name,full_name").eq("user_id", userId).maybeSingle(),
         ]);
 
       if (accErr) alert(accErr.message);
       if (allTxErr) alert(humanizeSupabaseSchemaError(allTxErr.message) ?? allTxErr.message);
       if (mTxErr) alert(humanizeSupabaseSchemaError(mTxErr.message) ?? mTxErr.message);
+      if (profileErr && profileErr.code !== "PGRST116") {
+        // PGRST116 = No rows found; ok when profiles isn't created yet.
+        // We'll fallback to auth.user_metadata / email.
+      }
 
       if (!cancelled) setAccounts((acc as Account[]) || []);
+
+      const p = (profile as Profile | null) ?? null;
+      const profileName =
+        (p?.first_name && String(p.first_name).trim()) ||
+        (p?.full_name && String(p.full_name).trim()) ||
+        fallbackName;
+      if (!cancelled) setName(profileName);
 
       const deltas: Record<string, number> = {};
       for (const t of (((allTx as unknown) as Tx[]) || [])) {
@@ -142,6 +157,12 @@ export default function Dashboard() {
   const totalBalance = useMemo(() => {
     return accountsLive.reduce((sum, a) => sum + a.live_balance, 0);
   }, [accountsLive]);
+
+  const accountNameById = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const a of accounts) map[a.id] = a.name;
+    return map;
+  }, [accounts]);
 
   const monthStats = useMemo(() => {
     let income = 0;
@@ -190,240 +211,196 @@ export default function Dashboard() {
     };
   }, [monthTxs]);
 
+  const savingsRate = useMemo(() => {
+    if (!monthStats.income) return 0;
+    return Math.max(0, Math.min(1, monthStats.savings / monthStats.income));
+  }, [monthStats.income, monthStats.savings]);
+
+  const recentTxs = useMemo(() => {
+    const items = [...monthTxs];
+    items.sort((a, b) => {
+      const da = a.tx_date ? new Date(a.tx_date).getTime() : a.created_at ? new Date(a.created_at).getTime() : 0;
+      const db = b.tx_date ? new Date(b.tx_date).getTime() : b.created_at ? new Date(b.created_at).getTime() : 0;
+      return db - da;
+    });
+    return items.slice(0, 8);
+  }, [monthTxs]);
+
   if (!configured || !supabaseConfigured) return null;
 
   return (
-    <main style={{ maxWidth: 1200, margin: "0 auto", padding: "3rem 2rem" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "3rem" }}>
-        <div>
-          <h1>💰 FinanzApp</h1>
-          <p style={{ fontSize: "0.95rem", color: "var(--text-secondary)" }}>Gestiona tus finanzas personales</p>
-        </div>
-        <button onClick={logout} style={{ background: "var(--danger)", color: "white" }}>
-          🚪 Cerrar sesión
-        </button>
-      </div>
-
-      <div
-        style={{
-          background: "linear-gradient(135deg, var(--primary) 0%, var(--info) 100%)",
-          color: "white",
-          borderRadius: "1rem",
-          padding: "1.75rem",
-          marginBottom: "2rem",
-          boxShadow: "var(--shadow-md)",
-        }}
-      >
-        <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: "1.5rem" }}>
-          <div>
-            <p style={{ fontSize: "0.95rem", opacity: 0.9, marginBottom: "0.4rem" }}>Sesión activa</p>
-            <h2 style={{ color: "white", background: "none", WebkitTextFillColor: "white", marginBottom: 0 }}>{email}</h2>
-            <p style={{ marginTop: "0.5rem", opacity: 0.9 }}>Mes actual: <strong>{ym}</strong></p>
+    <main className={styles.page}>
+      <header className={styles.topbar}>
+        <div className={styles.brand}>
+          <div className={styles.logo} aria-hidden="true" />
+          <div className={styles.brandText}>
+            <h1 className={styles.appName}>FinanzApp</h1>
+            <p className={styles.kicker}>Mes {ym} · {email}</p>
           </div>
+        </div>
+        <div className={styles.topActions}>
+          <button onClick={logout} className={styles.logout}>
+            Cerrar sesión
+          </button>
+        </div>
+      </header>
+
+      <section className={styles.hero}>
+        <div className={styles.heroRow}>
+          <div>
+            <h2 className={styles.heroHello}>Hola{loading ? "" : name ? `, ${name}` : ""}.</h2>
+            <p className={styles.heroSub}>
+              Un vistazo rápido a tu dinero: saldo total, resumen del mes y movimientos recientes.
+            </p>
+          </div>
+
           <div style={{ textAlign: "right" }}>
-            <p style={{ fontSize: "0.95rem", opacity: 0.9, marginBottom: "0.4rem" }}>Saldo total (actual)</p>
-            <div style={{ fontSize: "2.25rem", fontWeight: 800, lineHeight: 1.1 }}>
-              {loading ? "…" : formatEUR(totalBalance)}
-            </div>
-            <p style={{ marginTop: "0.5rem", opacity: 0.9 }}>
+            <p className={styles.heroMetricLabel}>Saldo total (actual)</p>
+            <div className={styles.heroMetricValue}>{loading ? "…" : formatEUR(totalBalance)}</div>
+            <p className={styles.heroSub}>
               Ahorro del mes: <strong>{loading ? "…" : formatEUR(monthStats.savings)}</strong>
             </p>
           </div>
         </div>
-      </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "1.5rem", marginBottom: "2.5rem" }}>
-        <Card title="🏦 Tus cuentas" subtitle="Saldo actual por cuenta" accent="var(--primary)">
+        <div className={styles.kpiGrid}>
+          <div className={styles.kpi}>
+            <p className={styles.kpiLabel}>Ingresos (mes)</p>
+            <div className={`${styles.kpiValue} ${styles.kpiValuePositive}`}>{loading ? "…" : `+${formatEUR(monthStats.income)}`}</div>
+          </div>
+          <div className={styles.kpi}>
+            <p className={styles.kpiLabel}>Gastos fijos</p>
+            <div className={`${styles.kpiValue} ${styles.kpiValueNegative}`}>{loading ? "…" : `-${formatEUR(monthStats.fixedOut)}`}</div>
+          </div>
+          <div className={styles.kpi}>
+            <p className={styles.kpiLabel}>Gastos variables</p>
+            <div className={`${styles.kpiValue} ${styles.kpiValueNegative}`}>{loading ? "…" : `-${formatEUR(monthStats.variableOut)}`}</div>
+          </div>
+          <div className={styles.kpi}>
+            <p className={styles.kpiLabel}>Tasa de ahorro</p>
+            <div className={styles.kpiValue}>{loading ? "…" : `${Math.round(savingsRate * 100)}%`}</div>
+            <div className={styles.meter} aria-hidden="true">
+              <div className={styles.meterFill} style={{ width: `${Math.round((1 - savingsRate) * 100)}%` }} />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div className={styles.grid}>
+        <section className={styles.card}>
+          <h3 className={styles.cardTitle}>Cuentas</h3>
+          <p className={styles.cardSub}>Saldo actual por cuenta (saldo inicial + movimientos)</p>
+
           {loading ? (
-            <p style={{ color: "var(--text-secondary)" }}>Cargando…</p>
+            <p style={{ marginTop: 12 }}>Cargando…</p>
           ) : accountsLive.length === 0 ? (
-            <div>
-              <p style={{ color: "var(--text-secondary)", marginBottom: "0.75rem" }}>Aún no tienes cuentas.</p>
-              <a href="/accounts" style={{ color: "var(--primary)", fontWeight: 700 }}>→ Crear mi primera cuenta</a>
+            <div style={{ marginTop: 12 }}>
+              <p>Aún no tienes cuentas.</p>
+              <a className={styles.smallLink} href="/accounts">→ Crear mi primera cuenta</a>
             </div>
           ) : (
-            <div style={{ display: "grid", gap: "0.75rem" }}>
+            <div className={styles.list}>
               {accountsLive.slice(0, 6).map((a) => (
-                <div key={a.id} style={{ display: "flex", justifyContent: "space-between", gap: "1rem", padding: "0.75rem", borderRadius: "0.75rem", background: "var(--surface-hover)" }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.name}</div>
-                    <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>
-                      Inicial: {formatEUR(Number(a.current_balance || 0))} · Mov: {a.delta >= 0 ? "+" : ""}{formatEUR(a.delta)}
-                    </div>
+                <div key={a.id} className={styles.listItem}>
+                  <div className={styles.listMain}>
+                    <p className={styles.listTitle}>{a.name}</p>
+                    <p className={styles.listMeta}>
+                      Inicial {formatEUR(Number(a.current_balance || 0))} · Mov {a.delta >= 0 ? "+" : ""}{formatEUR(a.delta)}
+                    </p>
                   </div>
-                  <div style={{ fontWeight: 800, color: a.live_balance >= 0 ? "var(--success)" : "var(--danger)" }}>
+                  <div
+                    className={`${styles.amount} ${a.live_balance >= 0 ? styles.amountIn : styles.amountOut}`}
+                  >
                     {formatEUR(a.live_balance)}
                   </div>
                 </div>
               ))}
-              <a href="/accounts" style={{ color: "var(--primary)", fontWeight: 700, marginTop: "0.25rem" }}>→ Ver todas</a>
+
+              <a className={styles.smallLink} href="/accounts">→ Ver todas</a>
             </div>
           )}
-        </Card>
+        </section>
 
-        <Card title="📅 Resumen del mes" subtitle="Ingresos, gastos y ahorro (sin transferencias)" accent="var(--success)">
-          {loading ? (
-            <p style={{ color: "var(--text-secondary)" }}>Cargando…</p>
-          ) : (
-            <div style={{ display: "grid", gap: "0.75rem" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0.75rem" }}>
-                <div style={{ color: "var(--text-secondary)" }}>Ingresos</div>
-                <div style={{ fontWeight: 800, color: "var(--success)" }}>+{formatEUR(monthStats.income)}</div>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0.75rem" }}>
-                <div style={{ color: "var(--text-secondary)" }}>Gasto fijo</div>
-                <div style={{ fontWeight: 800, color: "var(--danger)" }}>-{formatEUR(monthStats.fixedOut)}</div>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0.75rem" }}>
-                <div style={{ color: "var(--text-secondary)" }}>Variable</div>
-                <div style={{ fontWeight: 800, color: "var(--danger)" }}>-{formatEUR(monthStats.variableOut)}</div>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0.75rem" }}>
-                <div style={{ color: "var(--text-secondary)" }}>Otros</div>
-                <div style={{ fontWeight: 800, color: "var(--danger)" }}>-{formatEUR(monthStats.otherOut)}</div>
-              </div>
-              <div style={{ height: 1, background: "var(--border)", margin: "0.25rem 0" }} />
-              <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0.75rem" }}>
-                <div style={{ fontWeight: 800 }}>Ahorro del mes</div>
-                <div style={{ fontWeight: 900, color: monthStats.savings >= 0 ? "var(--success)" : "var(--danger)" }}>
-                  {formatEUR(monthStats.savings)}
+        <section className={styles.card}>
+          <h3 className={styles.cardTitle}>Acciones rápidas</h3>
+          <p className={styles.cardSub}>Lo que más vas a usar día a día</p>
+
+          <div className={styles.actions}>
+            <div className={styles.actionRow}>
+              <a className={styles.action} href="/movements">
+                <p className={styles.actionTitle}>📝 Nuevo movimiento</p>
+                <p className={styles.actionDesc}>Registrar ingreso o gasto</p>
+              </a>
+              <a className={styles.action} href="/transfers">
+                <p className={styles.actionTitle}>💸 Transferencia</p>
+                <p className={styles.actionDesc}>Mover dinero entre cuentas</p>
+              </a>
+            </div>
+            <div className={styles.actionRow}>
+              <a className={styles.action} href="/categories">
+                <p className={styles.actionTitle}>🏷️ Categorías</p>
+                <p className={styles.actionDesc}>Crear y ajustar categorías</p>
+              </a>
+              <a className={styles.action} href="/monthly">
+                <p className={styles.actionTitle}>📅 Mensual</p>
+                <p className={styles.actionDesc}>Detalle y cierre del mes</p>
+              </a>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section className={styles.card} style={{ marginTop: 16 }}>
+        <h3 className={styles.cardTitle}>Últimos movimientos</h3>
+        <p className={styles.cardSub}>Los más recientes de este mes</p>
+
+        {loading ? (
+          <p style={{ marginTop: 12 }}>Cargando…</p>
+        ) : recentTxs.length === 0 ? (
+          <div style={{ marginTop: 12 }}>
+            <p>Aún no hay movimientos este mes.</p>
+            <a className={styles.smallLink} href="/movements">→ Añadir el primero</a>
+          </div>
+        ) : (
+          <div className={styles.list}>
+            {recentTxs.map((t, idx) => {
+              const cat = Array.isArray(t.categories) ? t.categories[0] : t.categories;
+              const dir = cat?.direction;
+              const amt = Number(t.amount) || 0;
+              const isTransfer = Boolean(t.transfer_group_id);
+
+              const sign = dir === "INCOME" ? "+" : dir === "EXPENSE" ? "-" : "";
+              const amountClass = dir === "INCOME" ? styles.amountIn : styles.amountOut;
+
+              const title = (t.description && String(t.description).trim()) || (cat?.name ? String(cat.name) : "Movimiento");
+              const meta = [
+                safeDateLabel(t.tx_date, t.created_at),
+                accountNameById[t.account_id] ? `· ${accountNameById[t.account_id]}` : "",
+                isTransfer ? "· Transferencia" : cat?.name ? `· ${cat.name}` : "",
+              ]
+                .filter(Boolean)
+                .join(" ");
+
+              return (
+                <div key={`${t.account_id}-${t.ym}-${idx}`} className={styles.listItem}>
+                  <div className={styles.listMain}>
+                    <p className={styles.listTitle}>{title}</p>
+                    <p className={styles.listMeta}>{meta}</p>
+                  </div>
+                  <div className={`${styles.amount} ${amountClass}`}>{sign}{formatEUR(amt)}</div>
                 </div>
-              </div>
+              );
+            })}
 
-              <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>
-                Transferencias no cuentan como gasto/ingreso: salida {formatEUR(monthStats.transferOut)} · entrada {formatEUR(monthStats.transferIn)}
-              </div>
-              <a href="/monthly" style={{ color: "var(--primary)", fontWeight: 700 }}>→ Ver detalle mensual</a>
-            </div>
-          )}
-        </Card>
-      </div>
+            <a className={styles.smallLink} href="/movements">→ Ver movimientos</a>
+          </div>
+        )}
 
-      <div style={{ marginBottom: "3rem" }}>
-        <h2 style={{ marginBottom: "1.5rem" }}>📊 Gestiona tu dinero</h2>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "1.5rem" }}>
-          <a href="/accounts" style={{ textDecoration: "none" }}>
-            <div style={{
-              background: "var(--surface)",
-              border: "2px solid var(--border)",
-              borderRadius: "1rem",
-              padding: "2rem",
-              cursor: "pointer",
-              transition: "all 0.3s ease",
-              boxShadow: "var(--shadow)",
-              textAlign: "center"
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = "translateY(-8px)";
-              e.currentTarget.style.boxShadow = "var(--shadow-lg)";
-              e.currentTarget.style.borderColor = "var(--primary)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = "translateY(0)";
-              e.currentTarget.style.boxShadow = "var(--shadow)";
-              e.currentTarget.style.borderColor = "var(--border)";
-            }}>
-              <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>🏦</div>
-              <h3 style={{ marginBottom: "0.5rem" }}>Cuentas</h3>
-              <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)" }}>Gestiona tus cuentas bancarias y efectivo</p>
-              <div style={{ marginTop: "1.5rem", color: "var(--primary)", fontWeight: "600" }}>→ Ir a Cuentas</div>
-            </div>
-          </a>
-
-          <a href="/categories" style={{ textDecoration: "none" }}>
-            <div style={{
-              background: "var(--surface)",
-              border: "2px solid var(--border)",
-              borderRadius: "1rem",
-              padding: "2rem",
-              cursor: "pointer",
-              transition: "all 0.3s ease",
-              boxShadow: "var(--shadow)",
-              textAlign: "center"
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = "translateY(-8px)";
-              e.currentTarget.style.boxShadow = "var(--shadow-lg)";
-              e.currentTarget.style.borderColor = "var(--success)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = "translateY(0)";
-              e.currentTarget.style.boxShadow = "var(--shadow)";
-              e.currentTarget.style.borderColor = "var(--border)";
-            }}>
-              <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>🏷️</div>
-              <h3 style={{ marginBottom: "0.5rem" }}>Categorías</h3>
-              <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)" }}>Define tipos de ingresos y gastos</p>
-              <div style={{ marginTop: "1.5rem", color: "var(--success)", fontWeight: "600" }}>→ Ir a Categorías</div>
-            </div>
-          </a>
-
-          <a href="/movements" style={{ textDecoration: "none" }}>
-            <div style={{
-              background: "var(--surface)",
-              border: "2px solid var(--border)",
-              borderRadius: "1rem",
-              padding: "2rem",
-              cursor: "pointer",
-              transition: "all 0.3s ease",
-              boxShadow: "var(--shadow)",
-              textAlign: "center"
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = "translateY(-8px)";
-              e.currentTarget.style.boxShadow = "var(--shadow-lg)";
-              e.currentTarget.style.borderColor = "var(--info)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = "translateY(0)";
-              e.currentTarget.style.boxShadow = "var(--shadow)";
-              e.currentTarget.style.borderColor = "var(--border)";
-            }}>
-              <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>📝</div>
-              <h3 style={{ marginBottom: "0.5rem" }}>Movimientos</h3>
-              <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)" }}>Registra ingresos y gastos</p>
-              <div style={{ marginTop: "1.5rem", color: "var(--info)", fontWeight: "600" }}>→ Ir a Movimientos</div>
-            </div>
-          </a>
-
-          <a href="/transfers" style={{ textDecoration: "none" }}>
-            <div style={{
-              background: "var(--surface)",
-              border: "2px solid var(--border)",
-              borderRadius: "1rem",
-              padding: "2rem",
-              cursor: "pointer",
-              transition: "all 0.3s ease",
-              boxShadow: "var(--shadow)",
-              textAlign: "center"
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = "translateY(-8px)";
-              e.currentTarget.style.boxShadow = "var(--shadow-lg)";
-              e.currentTarget.style.borderColor = "var(--warning)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = "translateY(0)";
-              e.currentTarget.style.boxShadow = "var(--shadow)";
-              e.currentTarget.style.borderColor = "var(--border)";
-            }}>
-              <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>💸</div>
-              <h3 style={{ marginBottom: "0.5rem" }}>Transferencias</h3>
-              <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)" }}>Transferencias entre cuentas</p>
-              <div style={{ marginTop: "1.5rem", color: "var(--warning)", fontWeight: "600" }}>→ Ir a Transferencias</div>
-            </div>
-          </a>
-        </div>
-      </div>
-
-      <section style={{ background: "var(--surface-hover)", border: "1px solid var(--border)" }}>
-        <h3>ℹ️ Próximas mejoras</h3>
-        <ul style={{ paddingLeft: "1.5rem", color: "var(--text-secondary)" }}>
-          <li>📈 Dashboard con gráficos de ingresos y gastos</li>
-          <li>🎯 Presupuestos y alertas</li>
-          <li>📊 Reportes detallados por período</li>
-          <li>🔄 Importar transacciones desde CSV</li>
-        </ul>
+        {!loading ? (
+          <p style={{ marginTop: 10, fontSize: "0.85rem" }}>
+            Nota: transferencias no cuentan como gasto/ingreso (salida {formatEUR(monthStats.transferOut)} · entrada {formatEUR(monthStats.transferIn)}).
+          </p>
+        ) : null}
       </section>
     </main>
   );
