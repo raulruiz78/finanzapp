@@ -72,24 +72,17 @@ export default function Home() {
             </div>
 
             <p className={styles.subtitle}>
-              Falta configurar Supabase para poder usar el login.
+              Ahora mismo no se puede iniciar sesión.
             </p>
           </div>
 
           <div className={styles.card}>
             <h2 className={styles.title} style={{ fontSize: 18 }}>
-              Configuración requerida
+              Servicio no disponible
             </h2>
-            <pre className={styles.code}>
-{`Crea un archivo .env.local en finanzapp/ con:
-
-NEXT_PUBLIC_SUPABASE_URL=... 
-NEXT_PUBLIC_SUPABASE_ANON_KEY=...
-
-# Opcional (recomendado si abres el email fuera de tu máquina):
-# NEXT_PUBLIC_APP_URL=https://tu-dominio-o-ngrok`}
-            </pre>
-            <p className={styles.note}>Luego reinicia el dev server.</p>
+            <p className={styles.subtitle}>
+              Estamos teniendo un problema técnico. Prueba de nuevo más tarde.
+            </p>
           </div>
         </section>
       </main>
@@ -178,10 +171,6 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=...
                 {busy === "reset" ? "Enviando email…" : "He olvidado mi contraseña"}
               </button>
             </div>
-
-            <p className={styles.note}>
-              Si usas emails de confirmación de Supabase, revisa que tus Redirect URLs apunten a tu dominio.
-            </p>
           </div>
         </div>
       </section>
