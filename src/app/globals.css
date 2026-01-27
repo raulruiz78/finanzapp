@@ -53,6 +53,7 @@ html {
   scroll-behavior: smooth;
   /* Slightly smaller base makes inline `rem` styles more compact across pages */
   font-size: 15px;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
@@ -246,6 +247,46 @@ hr {
     display: block;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* Mobile-specific polish (kept isolated so desktop is untouched) */
+@media (max-width: 640px) {
+  html {
+    font-size: 14px;
+  }
+
+  /* Many pages use inline padding; override only on small screens */
+  main {
+    padding: 1rem !important;
+  }
+
+  section {
+    padding: 1rem !important;
+  }
+
+  h1 {
+    font-size: 1.6rem;
+    margin-bottom: 0.6em;
+  }
+
+  h2 {
+    font-size: 1.25rem;
+  }
+
+  /* Better tap targets */
+  button {
+    padding: 0.7rem 1rem;
+  }
+
+  input,
+  select {
+    padding: 0.7rem 0.9rem;
+  }
+
+  /* Prevent accidental horizontal scrolling on small screens */
+  body {
+    overflow-x: hidden;
   }
 }
 
