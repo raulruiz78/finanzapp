@@ -1,31 +1,58 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { useEffect, useMemo, useState } from "react";
+import { supabase, supabaseConfigured } from "@/lib/supabase";
+import { useRequireSupabaseConfigured } from "@/lib/useRequireSupabaseConfigured";
+import type { Account, CategoryJoin, OneOrMany } from "@/lib/types";
 
-type Account = {
-  id: string;
-  name: string;
-  current_balance: number;
+type TxForBalance = {
+  account_id: string;
+  amount: number;
+  categories?: OneOrMany<CategoryJoin> | null;
 };
 
 export default function AccountsPage() {
+  const configured = useRequireSupabaseConfigured("/");
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [deltaByAccount, setDeltaByAccount] = useState<Record<string, number>>({});
   const [name, setName] = useState("");
   const [balance, setBalance] = useState<number>(0);
 
   async function loadAccounts() {
-    const { data, error } = await supabase
-      .from("accounts")
-      .select("*")
-      .order("created_at");
+    if (!supabase) return;
 
-    if (error) alert(error.message);
-    else setAccounts(data || []);
+    const { data: session } = await supabase.auth.getSession();
+    const userId = session?.session?.user?.id;
+    if (!userId) return;
+
+    const [{ data: acc, error: accErr }, { data: tx, error: txErr }] = await Promise.all([
+      supabase.from("accounts").select("id,name,current_balance").order("created_at"),
+      supabase
+        .from("transactions")
+        .select("account_id,amount,categories:categories(direction)")
+        .eq("user_id", userId),
+    ]);
+
+    if (accErr) alert(accErr.message);
+    if (txErr) alert(txErr.message);
+
+    setAccounts((acc as Account[]) || []);
+
+    const deltas: Record<string, number> = {};
+    for (const t of (((tx as unknown) as TxForBalance[]) || [])) {
+      const cat = Array.isArray(t.categories) ? t.categories[0] : t.categories;
+      const dir = cat?.direction ?? null;
+      const amt = Number(t.amount) || 0;
+      const delta = dir === "INCOME" ? amt : dir === "EXPENSE" ? -amt : 0;
+      deltas[t.account_id] = (deltas[t.account_id] || 0) + delta;
+    }
+    setDeltaByAccount(deltas);
   }
 
   async function createAccount() {
     if (!name.trim()) return alert("Nombre requerido");
+
+    if (!supabase) return;
 
     const { data: session } = await supabase.auth.getSession();
     if (!session?.session?.user?.id) return alert("No autenticado");
@@ -46,6 +73,8 @@ export default function AccountsPage() {
   async function deleteAccount(id: string) {
     if (!confirm("¿Borrar esta cuenta? Se perderán sus movimientos.")) return;
 
+    if (!supabase) return;
+
     const { error } = await supabase.from("accounts").delete().eq("id", id);
     if (error) alert(error.message);
     else loadAccounts();
@@ -55,7 +84,19 @@ export default function AccountsPage() {
     loadAccounts();
   }, []);
 
-  const totalBalance = accounts.reduce((sum, a) => sum + a.current_balance, 0);
+  const accountsWithLive = useMemo(() => {
+    return accounts.map((a) => {
+      const delta = deltaByAccount[a.id] || 0;
+      const live = Number(a.current_balance || 0) + delta;
+      return { ...a, live_balance: live, delta };
+    });
+  }, [accounts, deltaByAccount]);
+
+  const totalBalance = useMemo(() => {
+    return accountsWithLive.reduce((sum, a) => sum + a.live_balance, 0);
+  }, [accountsWithLive]);
+
+  if (!configured || !supabaseConfigured) return null;
 
   return (
     <main style={{ maxWidth: 900, margin: "0 auto", padding: "3rem 2rem" }}>
@@ -116,7 +157,7 @@ export default function AccountsPage() {
           </div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: "1.5rem" }}>
-            {accounts.map((a) => (
+            {accountsWithLive.map((a) => (
               <div
                 key={a.id}
                 style={{
@@ -140,9 +181,12 @@ export default function AccountsPage() {
                 <div style={{ fontSize: "2.5rem", marginBottom: "1rem" }}>🏦</div>
                 <h4 style={{ marginBottom: "0.75rem", fontSize: "1.1rem" }}>{a.name}</h4>
                 <div style={{ marginBottom: "1rem" }}>
-                  <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginBottom: "0.25rem" }}>Saldo</p>
-                  <p style={{ fontSize: "1.5rem", fontWeight: "700", color: a.current_balance >= 0 ? "var(--success)" : "var(--danger)" }}>
-                    {a.current_balance.toFixed(2)} €
+                  <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginBottom: "0.25rem" }}>Saldo actual</p>
+                  <p style={{ fontSize: "1.5rem", fontWeight: "700", color: a.live_balance >= 0 ? "var(--success)" : "var(--danger)" }}>
+                    {a.live_balance.toFixed(2)} €
+                  </p>
+                  <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: "0.25rem" }}>
+                    Inicial: {Number(a.current_balance || 0).toFixed(2)} € · Movimientos: {a.delta >= 0 ? "+" : ""}{a.delta.toFixed(2)} €
                   </p>
                 </div>
                 <button

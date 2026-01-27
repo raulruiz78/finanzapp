@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase, supabaseConfigured } from "@/lib/supabase";
+import { useRequireSupabaseConfigured } from "@/lib/useRequireSupabaseConfigured";
+import { humanizeSupabaseSchemaError } from "@/lib/supabaseErrorMessage";
+import { VARIABLE_EXPENSE_NAME, VARIABLE_INCOME_NAME } from "@/lib/internalCategories";
+import type { AccountLite, Category, CategoryJoin, AccountJoin, OneOrMany, Direction } from "@/lib/types";
 
-type Account = { id: string; name: string };
-type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE"; bucket: "FIXED" | "VARIABLE" | "TRANSFER" | "OTHER" };
+type Account = AccountLite;
 
 type TxRow = {
   id: string;
@@ -16,8 +19,8 @@ type TxRow = {
   category_id: string;
   transfer_group_id: string | null;
   created_at: string;
-  accounts?: { name: string }[] | null;
-  categories?: { name: string; direction: string; bucket: string }[] | null;
+  accounts?: OneOrMany<AccountJoin> | null;
+  categories?: OneOrMany<CategoryJoin> | null;
 };
 
 function currentYM() {
@@ -41,6 +44,7 @@ function newUUID() {
 }
 
 export default function TransfersPage() {
+  const configured = useRequireSupabaseConfigured("/");
   const [ym, setYm] = useState(currentYM());
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -51,10 +55,44 @@ export default function TransfersPage() {
   const [txDate, setTxDate] = useState<string>("");
   const [note, setNote] = useState<string>("");
 
+  async function ensureVariableCategoryId(userId: string, dir: "INCOME" | "EXPENSE") {
+    if (!supabase) return null;
+    const name = dir === "INCOME" ? VARIABLE_INCOME_NAME : VARIABLE_EXPENSE_NAME;
+
+    const { data, error } = await supabase
+      .from("categories")
+      .select("id,name,direction,amount")
+      .eq("user_id", userId)
+      .eq("name", name)
+      .maybeSingle();
+
+    if (error) return null;
+    if ((data as any)?.id) return (data as any).id as string;
+
+    // categories.amount has a >0 constraint in your schema, so we use a tiny amount.
+    const ins = await supabase.from("categories").insert({
+      user_id: userId,
+      name,
+      direction: dir,
+      amount: 0.01,
+    });
+    if (ins.error) return null;
+
+    const reread = await supabase
+      .from("categories")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("name", name)
+      .maybeSingle();
+    if (reread.error) return null;
+    return (reread.data as any)?.id ?? null;
+  }
+
   async function loadBase() {
+    if (!supabase) return;
     const [{ data: acc, error: accErr }, { data: cat, error: catErr }] = await Promise.all([
       supabase.from("accounts").select("id,name").order("created_at"),
-      supabase.from("categories").select("id,name,direction,bucket").order("created_at"),
+      supabase.from("categories").select("id,name,direction,amount").order("created_at"),
     ]);
 
     if (accErr) alert(accErr.message);
@@ -68,71 +106,33 @@ export default function TransfersPage() {
     if (!toAccountId && accs[1]?.id) setToAccountId(accs[1].id);
   }
 
-  async function ensureTransferCategories() {
-    const { data, error } = await supabase
-      .from("categories")
-      .select("id,name,direction,bucket")
-      .in("name", ["Transferencia (salida)", "Transferencia (entrada)"]);
-
-    if (error) {
-      alert(error.message);
-      return { outId: null as string | null, inId: null as string | null };
-    }
-
-    const existing = (data as Category[]) || [];
-    const out = existing.find((c) => c.name === "Transferencia (salida)");
-    const inn = existing.find((c) => c.name === "Transferencia (entrada)");
-
-    const toInsert: Array<Partial<Category> & { name: string; direction: any; bucket: any; user_id?: string }> = [];
-    if (!out) toInsert.push({ name: "Transferencia (salida)", direction: "EXPENSE", bucket: "TRANSFER" });
-    if (!inn) toInsert.push({ name: "Transferencia (entrada)", direction: "INCOME", bucket: "TRANSFER" });
-
-    if (toInsert.length > 0) {
-      const { data: session } = await supabase.auth.getSession();
-      if (session?.session?.user?.id) {
-        const userId = session.session.user.id;
-        const toInsertWithUser = toInsert.map(item => ({ ...item, user_id: userId }));
-        const ins = await supabase.from("categories").insert(toInsertWithUser);
-        if (ins.error) {
-          // Si ya existen, no importa
-        }
-      }
-    }
-
-    const { data: data2, error: err2 } = await supabase
-      .from("categories")
-      .select("id,name,direction,bucket")
-      .in("name", ["Transferencia (salida)", "Transferencia (entrada)"]);
-
-    if (err2) {
-      alert(err2.message);
-      return { outId: null, inId: null };
-    }
-
-    const final = (data2 as Category[]) || [];
-    const out2 = final.find((c) => c.name === "Transferencia (salida)");
-    const in2 = final.find((c) => c.name === "Transferencia (entrada)");
-
-    return { outId: out2?.id ?? null, inId: in2?.id ?? null };
+  function pickVariableCategoryId(dir: "INCOME" | "EXPENSE") {
+    const preferredName = dir === "INCOME" ? VARIABLE_INCOME_NAME : VARIABLE_EXPENSE_NAME;
+    return categories.find((c) => c.direction === dir && c.name === preferredName)?.id ?? null;
   }
 
   async function loadTransfers() {
     if (!isValidYM(ym)) return;
+    if (!supabase) return;
 
     const { data, error } = await supabase
       .from("transactions")
       .select(`
         id, ym, tx_date, description, amount, account_id, category_id, transfer_group_id, created_at,
         accounts:accounts(name),
-        categories:categories(name, direction, bucket)
+        categories:categories(name, direction)
       `)
       .eq("ym", ym)
       .not("transfer_group_id", "is", null)
       .order("tx_date", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: true });
 
-    if (error) alert(error.message);
-    else setTxs((data as TxRow[]) || []);
+    if (error) {
+      alert(humanizeSupabaseSchemaError(error.message) ?? error.message);
+      return;
+    }
+
+    setTxs((data as TxRow[]) || []);
   }
 
   async function createTransfer() {
@@ -142,18 +142,23 @@ export default function TransfersPage() {
     if (!Number.isFinite(amount) || amount <= 0) return alert("Cantidad debe ser > 0");
     if (txDate && !/^\d{4}-\d{2}-\d{2}$/.test(txDate)) return alert("Fecha inválida. Usa YYYY-MM-DD o déjala vacía.");
 
+    if (!supabase) return;
+
     const { data: session } = await supabase.auth.getSession();
     if (!session?.session?.user?.id) return alert("No autenticado");
 
     const fromName = accounts.find((a) => a.id === fromAccountId)?.name ?? "origen";
     const toName = accounts.find((a) => a.id === toAccountId)?.name ?? "destino";
 
-    const { outId, inId } = await ensureTransferCategories();
-    if (!outId || !inId) return alert("No se pudieron preparar las categorías de transferencia.");
+    // We keep transfers "as variable" by using the dedicated variable categories.
+    // The DB schema requires category_id NOT NULL.
+    const userId = session.session.user.id;
+    const outId = (await ensureVariableCategoryId(userId, "EXPENSE")) ?? pickVariableCategoryId("EXPENSE");
+    const inId = (await ensureVariableCategoryId(userId, "INCOME")) ?? pickVariableCategoryId("INCOME");
+    if (!outId || !inId) return alert("No se pudieron preparar las categorías de movimiento variable.");
 
     const groupId = newUUID();
     const baseDesc = note.trim() ? `Transferencia: ${note.trim()}` : "Transferencia";
-    const userId = session.session.user.id;
 
     const outTx = {
       ym,
@@ -190,6 +195,8 @@ export default function TransfersPage() {
   async function deleteTransfer(groupId: string) {
     if (!confirm("¿Borrar esta transferencia? (se borran los 2 asientos)")) return;
 
+    if (!supabase) return;
+
     const { error } = await supabase.from("transactions").delete().eq("transfer_group_id", groupId);
     if (error) alert(error.message);
     else loadTransfers();
@@ -214,11 +221,20 @@ export default function TransfersPage() {
     }
 
     const rows = Array.from(map.entries()).map(([groupId, items]) => {
-      const out = items.find((x) => x.categories?.[0]?.direction === "EXPENSE");
-      const inn = items.find((x) => x.categories?.[0]?.direction === "INCOME");
+      const out = items.find((x) => {
+        const cat = Array.isArray(x.categories) ? x.categories[0] : x.categories;
+        return cat?.direction === "EXPENSE";
+      });
+      const inn = items.find((x) => {
+        const cat = Array.isArray(x.categories) ? x.categories[0] : x.categories;
+        return cat?.direction === "INCOME";
+      });
 
-      const from = out?.accounts?.[0]?.name ?? "¿origen?";
-      const to = inn?.accounts?.[0]?.name ?? "¿destino?";
+      const outAcc = Array.isArray(out?.accounts) ? out?.accounts[0] : out?.accounts;
+      const inAcc = Array.isArray(inn?.accounts) ? inn?.accounts[0] : inn?.accounts;
+
+      const from = outAcc?.name ?? "¿origen?";
+      const to = inAcc?.name ?? "¿destino?";
       const amount = Number(out?.amount ?? inn?.amount ?? 0);
       const date = out?.tx_date ?? inn?.tx_date ?? "";
       const desc = out?.description ?? inn?.description ?? "Transferencia";
@@ -229,6 +245,8 @@ export default function TransfersPage() {
     rows.sort((a, b) => (a.date || "9999-12-31").localeCompare(b.date || "9999-12-31") || a.desc.localeCompare(b.desc));
     return rows;
   }, [txs]);
+
+  if (!configured || !supabaseConfigured) return null;
 
   return (
     <main style={{ maxWidth: 1100, margin: "0 auto", padding: "3rem 2rem" }}>
