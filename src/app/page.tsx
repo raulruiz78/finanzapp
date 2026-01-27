@@ -2,11 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { supabase, supabaseConfigured } from "@/lib/supabase";
+import styles from "./page.module.css";
 
 export default function Home() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState<"" | "login" | "register" | "reset">("");
+
+  function getAppBaseUrl() {
+    const fromEnv = process.env.NEXT_PUBLIC_APP_URL?.trim();
+    const base = fromEnv && fromEnv.length > 0 ? fromEnv : window.location.origin;
+    return base.replace(/\/+$/, "");
+  }
 
   useEffect(() => {
     if (!supabase) return;
@@ -19,7 +26,7 @@ export default function Home() {
   async function onRegister() {
     if (!supabase) return;
     setBusy("register");
-    const emailRedirectTo = `${window.location.origin}/auth/callback`;
+    const emailRedirectTo = `${getAppBaseUrl()}/auth/callback`;
     const { error } = await supabase.auth.signUp({
       email,
       password,
@@ -44,7 +51,7 @@ export default function Home() {
     if (!email.trim()) return alert("Escribe tu email primero.");
 
     setBusy("reset");
-    const redirectTo = `${window.location.origin}/auth/reset`;
+    const redirectTo = `${getAppBaseUrl()}/auth/reset`;
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo });
     setBusy("");
     if (error) return alert(error.message);
@@ -53,73 +60,130 @@ export default function Home() {
 
   if (!supabaseConfigured) {
     return (
-      <main style={{ maxWidth: 680, margin: "60px auto", fontFamily: "system-ui" }}>
-        <h1>FinanzApp</h1>
-        <p style={{ opacity: 0.8 }}>
-          Falta configurar Supabase para poder usar el login.
-        </p>
-        <pre
-          style={{
-            marginTop: 16,
-            padding: 16,
-            borderRadius: 12,
-            background: "#0b1020",
-            color: "#e5e7eb",
-            overflowX: "auto",
-          }}
-        >
+      <main className={styles.page}>
+        <section className={styles.shell}>
+          <div className={styles.hero}>
+            <div className={styles.brand}>
+              <div className={styles.logo} aria-hidden />
+              <div>
+                <h1 className={styles.title}>FinanzApp</h1>
+                <p className={styles.subtitle}>Tu gestor simple de finanzas</p>
+              </div>
+            </div>
+
+            <p className={styles.subtitle}>
+              Falta configurar Supabase para poder usar el login.
+            </p>
+          </div>
+
+          <div className={styles.card}>
+            <h2 className={styles.title} style={{ fontSize: 18 }}>
+              Configuración requerida
+            </h2>
+            <pre className={styles.code}>
 {`Crea un archivo .env.local en finanzapp/ con:
 
 NEXT_PUBLIC_SUPABASE_URL=... 
-NEXT_PUBLIC_SUPABASE_ANON_KEY=...`}
-        </pre>
-        <p style={{ opacity: 0.7, marginTop: 12 }}>
-          Luego reinicia el dev server.
-        </p>
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+
+# Opcional (recomendado si abres el email fuera de tu máquina):
+# NEXT_PUBLIC_APP_URL=https://tu-dominio-o-ngrok`}
+            </pre>
+            <p className={styles.note}>Luego reinicia el dev server.</p>
+          </div>
+        </section>
       </main>
     );
   }
 
   return (
-    <main style={{ maxWidth: 420, margin: "60px auto", fontFamily: "system-ui" }}>
-      <h1>FinanzApp</h1>
-      <p style={{ opacity: 0.7 }}>Login con email + password (Supabase)</p>
+    <main className={styles.page}>
+      <section className={styles.shell}>
+        <div className={styles.hero}>
+          <div className={styles.brand}>
+            <div className={styles.logo} aria-hidden />
+            <div>
+              <h1 className={styles.title}>FinanzApp</h1>
+              <p className={styles.subtitle}>Controla ingresos, gastos y transferencias</p>
+            </div>
+          </div>
 
-      <div style={{ display: "grid", gap: 10 }}>
-        <input
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          style={{ padding: 10, borderRadius: 10, border: "1px solid #ddd" }}
-        />
-        <input
-          placeholder="Password"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          style={{ padding: 10, borderRadius: 10, border: "1px solid #ddd" }}
-        />
+          <ul className={styles.bullets}>
+            <li>Dashboard con saldo y movimientos</li>
+            <li>Categorías y cuentas configurables</li>
+            <li>Recuperación de contraseña por email</li>
+          </ul>
 
-        <button onClick={onLogin} style={{ padding: 10, borderRadius: 10 }} disabled={busy === "login"}>
-          {busy === "login" ? "Entrando…" : "Login"}
-        </button>
+          <p className={styles.note}>
+            Nota: en Supabase debes permitir los redirects a <code>/auth/callback</code> y <code>/auth/reset</code>.
+          </p>
+        </div>
 
-        <button onClick={onRegister} style={{ padding: 10, borderRadius: 10 }} disabled={busy === "register"}>
-          {busy === "register" ? "Creando…" : "Crear cuenta"}
-        </button>
+        <div className={styles.card}>
+          <h2 className={styles.title} style={{ fontSize: 18 }}>
+            Entrar
+          </h2>
+          <p className={styles.subtitle}>Email + contraseña (Supabase)</p>
 
-        <button
-          onClick={onForgotPassword}
-          style={{ padding: 10, borderRadius: 10, background: "transparent", border: "1px solid #ddd" }}
-          disabled={busy === "reset"}
-        >
-          {busy === "reset" ? "Enviando email…" : "He olvidado mi contraseña"}
-        </button>
-      </div>
+          <div className={styles.form}>
+            <div className={styles.field}>
+              <label className={styles.label} htmlFor="email">
+                Email
+              </label>
+              <input
+                id="email"
+                className={styles.input}
+                placeholder="tu@email.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+                inputMode="email"
+              />
+            </div>
 
-      <p style={{ marginTop: 12, opacity: 0.7, fontSize: 13 }}>
-        Nota: en Supabase debes añadir <code>/auth/callback</code> y <code>/auth/reset</code> a tus Redirect URLs.
-      </p>
+            <div className={styles.field}>
+              <label className={styles.label} htmlFor="password">
+                Contraseña
+              </label>
+              <input
+                id="password"
+                className={styles.input}
+                placeholder="••••••••"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+              />
+            </div>
+
+            <div className={styles.actions}>
+              <button
+                onClick={onLogin}
+                className={`${styles.button} ${styles.primary}`}
+                disabled={busy === "login"}
+              >
+                {busy === "login" ? "Entrando…" : "Login"}
+              </button>
+
+              <button
+                onClick={onRegister}
+                className={`${styles.button} ${styles.secondary}`}
+                disabled={busy === "register"}
+              >
+                {busy === "register" ? "Creando cuenta…" : "Crear cuenta"}
+              </button>
+
+              <button
+                onClick={onForgotPassword}
+                className={`${styles.button} ${styles.ghost}`}
+                disabled={busy === "reset"}
+              >
+                {busy === "reset" ? "Enviando email…" : "He olvidado mi contraseña"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
   );
 }
