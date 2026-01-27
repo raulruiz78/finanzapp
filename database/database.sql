@@ -7,9 +7,13 @@
 -- ==========================================
 -- MIGRATION (existing DB)
 -- Adds the missing relationship so PostgREST can join transactions -> categories.
+-- Adds user profiles (Nombre/Apellidos) + RLS policies.
 -- ==========================================
 
 begin;
+
+-- Needed for gen_random_uuid() on fresh installs and some older projects.
+create extension if not exists pgcrypto;
 
 -- If there are transactions pointing to category_id values that don't exist in categories,
 -- the FK creation will fail. We auto-create placeholder categories for those IDs.
@@ -47,6 +51,105 @@ end
 $$;
 
 -- ==========================================
+-- USER PROFILES (Nombre/Apellidos)
+-- A small table to store profile fields (optional but recommended).
+-- ==========================================
+
+create table if not exists public.profiles (
+  user_id uuid not null,
+  first_name text,
+  last_name text,
+  full_name text,
+  created_at timestamp with time zone not null default now(),
+  updated_at timestamp with time zone not null default now(),
+  constraint profiles_pkey primary key (user_id),
+  constraint profiles_user_id_fkey foreign key (user_id) references auth.users(id) on delete cascade
+);
+
+create index if not exists profiles_user_id_idx on public.profiles (user_id);
+
+-- Backfill profiles for existing users (uses auth.users.user_metadata when present)
+insert into public.profiles (user_id, first_name, last_name, full_name, created_at, updated_at)
+select
+  u.id as user_id,
+  nullif(trim(coalesce(u.raw_user_meta_data->>'first_name', '')), '') as first_name,
+  nullif(trim(coalesce(u.raw_user_meta_data->>'last_name', '')), '') as last_name,
+  nullif(trim(coalesce(u.raw_user_meta_data->>'full_name', '')), '') as full_name,
+  now() as created_at,
+  now() as updated_at
+from auth.users u
+left join public.profiles p on p.user_id = u.id
+where p.user_id is null;
+
+-- Keep updated_at fresh
+create or replace function public.set_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_trigger
+    where tgname = 'profiles_set_updated_at'
+  ) then
+    create trigger profiles_set_updated_at
+    before update on public.profiles
+    for each row
+    execute function public.set_updated_at();
+  end if;
+end
+$$;
+
+-- Auto-create profile row on sign up
+create or replace function public.handle_new_user_profile()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.profiles (user_id, first_name, last_name, full_name)
+  values (
+    new.id,
+    nullif(trim(coalesce(new.raw_user_meta_data->>'first_name', '')), ''),
+    nullif(trim(coalesce(new.raw_user_meta_data->>'last_name', '')), ''),
+    nullif(trim(coalesce(new.raw_user_meta_data->>'full_name', '')), '')
+  )
+  on conflict (user_id) do update
+  set
+    first_name = excluded.first_name,
+    last_name = excluded.last_name,
+    full_name = excluded.full_name,
+    updated_at = now();
+
+  return new;
+end;
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_trigger
+    where tgname = 'on_auth_user_created_profile'
+      and tgrelid = 'auth.users'::regclass
+  ) then
+    create trigger on_auth_user_created_profile
+    after insert on auth.users
+    for each row
+    execute function public.handle_new_user_profile();
+  end if;
+end
+$$;
+
+-- ==========================================
 -- MULTI-USER SAFETY (RLS)
 -- Ensures each user only sees/edits their own data.
 -- ==========================================
@@ -62,6 +165,7 @@ alter table public.accounts enable row level security;
 alter table public.categories enable row level security;
 alter table public.transactions enable row level security;
 alter table public.month_balances enable row level security;
+alter table public.profiles enable row level security;
 
 -- Policies: accounts
 do $$
@@ -159,6 +263,21 @@ begin
 end
 $$;
 
+-- Policies: profiles
+do $$
+begin
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='profiles' and policyname='profiles_select_own') then
+    create policy profiles_select_own on public.profiles for select to authenticated using (user_id = auth.uid());
+  end if;
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='profiles' and policyname='profiles_insert_own') then
+    create policy profiles_insert_own on public.profiles for insert to authenticated with check (user_id = auth.uid());
+  end if;
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='profiles' and policyname='profiles_update_own') then
+    create policy profiles_update_own on public.profiles for update to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+  end if;
+end
+$$;
+
 commit;
 
 -- Optional: force PostgREST schema reload (usually auto-refreshes, but can help)
@@ -167,6 +286,8 @@ commit;
 -- ==========================================
 -- SCHEMA (fresh install only)
 -- ==========================================
+
+create extension if not exists pgcrypto;
 
 CREATE TABLE IF NOT EXISTS public.accounts (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -178,6 +299,85 @@ CREATE TABLE IF NOT EXISTS public.accounts (
   CONSTRAINT accounts_pkey PRIMARY KEY (id),
   CONSTRAINT accounts_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
 );
+
+CREATE TABLE IF NOT EXISTS public.profiles (
+  user_id uuid NOT NULL,
+  first_name text,
+  last_name text,
+  full_name text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT profiles_pkey PRIMARY KEY (user_id),
+  CONSTRAINT profiles_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE
+);
+
+create index if not exists profiles_user_id_idx on public.profiles (user_id);
+
+create or replace function public.set_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_trigger
+    where tgname = 'profiles_set_updated_at'
+  ) then
+    create trigger profiles_set_updated_at
+    before update on public.profiles
+    for each row
+    execute function public.set_updated_at();
+  end if;
+end
+$$;
+
+create or replace function public.handle_new_user_profile()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.profiles (user_id, first_name, last_name, full_name)
+  values (
+    new.id,
+    nullif(trim(coalesce(new.raw_user_meta_data->>'first_name', '')), ''),
+    nullif(trim(coalesce(new.raw_user_meta_data->>'last_name', '')), ''),
+    nullif(trim(coalesce(new.raw_user_meta_data->>'full_name', '')), '')
+  )
+  on conflict (user_id) do update
+  set
+    first_name = excluded.first_name,
+    last_name = excluded.last_name,
+    full_name = excluded.full_name,
+    updated_at = now();
+
+  return new;
+end;
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_trigger
+    where tgname = 'on_auth_user_created_profile'
+      and tgrelid = 'auth.users'::regclass
+  ) then
+    create trigger on_auth_user_created_profile
+    after insert on auth.users
+    for each row
+    execute function public.handle_new_user_profile();
+  end if;
+end
+$$;
 CREATE TABLE IF NOT EXISTS public.categories (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,

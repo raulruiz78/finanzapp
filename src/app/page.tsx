@@ -7,7 +7,7 @@ import styles from "./page.module.css";
 export default function Home() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState<"" | "login" | "register" | "reset">("");
+  const [busy, setBusy] = useState<"" | "login" | "reset">("");
 
   function getAppBaseUrl() {
     const fromEnv = process.env.NEXT_PUBLIC_APP_URL?.trim();
@@ -22,20 +22,6 @@ export default function Home() {
       if (data.session) window.location.href = "/dashboard";
     });
   }, []);
-
-  async function onRegister() {
-    if (!supabase) return;
-    setBusy("register");
-    const emailRedirectTo = `${getAppBaseUrl()}/auth/callback`;
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { emailRedirectTo },
-    });
-    setBusy("");
-    if (error) return alert(error.message);
-    alert("Usuario creado. Revisa tu email para confirmar la cuenta.");
-  }
 
   async function onLogin() {
     if (!supabase) return;
@@ -109,68 +95,83 @@ export default function Home() {
           </ul>
         </div>
 
-        <div className={styles.card}>
-          <h2 className={styles.title} style={{ fontSize: 18 }}>
-            Entrar
-          </h2>
-          <p className={styles.subtitle}>Email + contraseña (Supabase)</p>
+        <div className={styles.stack}>
+          <div className={styles.card}>
+            <h2 className={styles.title} style={{ fontSize: 18 }}>
+              Entrar
+            </h2>
+            <p className={styles.subtitle}>Accede con tu email y contraseña</p>
 
-          <div className={styles.form}>
-            <div className={styles.field}>
-              <label className={styles.label} htmlFor="email">
-                Email
-              </label>
-              <input
-                id="email"
-                className={styles.input}
-                placeholder="tu@email.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoComplete="email"
-                inputMode="email"
-              />
+            <div className={styles.form}>
+              <div className={styles.field}>
+                <label className={styles.label} htmlFor="email">
+                  Email
+                </label>
+                <input
+                  id="email"
+                  className={styles.input}
+                  placeholder="tu@email.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                  inputMode="email"
+                />
+              </div>
+
+              <div className={styles.field}>
+                <label className={styles.label} htmlFor="password">
+                  Contraseña
+                </label>
+                <input
+                  id="password"
+                  className={styles.input}
+                  placeholder="••••••••"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                />
+              </div>
+
+              <div className={styles.actions}>
+                <button
+                  onClick={onLogin}
+                  className={`${styles.button} ${styles.primary}`}
+                  disabled={busy === "login"}
+                >
+                  {busy === "login" ? "Entrando…" : "Entrar"}
+                </button>
+
+                <button
+                  onClick={onForgotPassword}
+                  className={`${styles.button} ${styles.ghost}`}
+                  disabled={busy === "reset"}
+                >
+                  {busy === "reset" ? "Enviando email…" : "He olvidado mi contraseña"}
+                </button>
+              </div>
             </div>
+          </div>
 
-            <div className={styles.field}>
-              <label className={styles.label} htmlFor="password">
-                Contraseña
-              </label>
-              <input
-                id="password"
-                className={styles.input}
-                placeholder="••••••••"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
-              />
-            </div>
+          <div className={styles.card}>
+            <h2 className={styles.title} style={{ fontSize: 18 }}>
+              Crear cuenta
+            </h2>
+            <p className={styles.subtitle}>
+              Empieza en 1 minuto. Te pediremos nombre y apellidos.
+            </p>
 
-            <div className={styles.actions}>
-              <button
-                onClick={onLogin}
-                className={`${styles.button} ${styles.primary}`}
-                disabled={busy === "login"}
-              >
-                {busy === "login" ? "Entrando…" : "Login"}
-              </button>
+            <a
+              href="/signin"
+              className={`${styles.button} ${styles.secondary}`}
+              style={{ display: "inline-block", textAlign: "center", textDecoration: "none" }}
+            >
+              Ir a registro
+            </a>
 
-              <button
-                onClick={onRegister}
-                className={`${styles.button} ${styles.secondary}`}
-                disabled={busy === "register"}
-              >
-                {busy === "register" ? "Creando cuenta…" : "Crear cuenta"}
-              </button>
-
-              <button
-                onClick={onForgotPassword}
-                className={`${styles.button} ${styles.ghost}`}
-                disabled={busy === "reset"}
-              >
-                {busy === "reset" ? "Enviando email…" : "He olvidado mi contraseña"}
-              </button>
-            </div>
+            <p className={styles.note}>
+              Al crear la cuenta puede que tengas que confirmar tu email.
+            </p>
           </div>
         </div>
       </section>

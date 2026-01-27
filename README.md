@@ -30,70 +30,129 @@ finanzapp/
 	README.md
 ```
 
-## Requisitos
-- Node 18+ (recomendado)
-- npm
+# FinanzApp
 
-## Ejecutar en local
+Aplicación web de finanzas personales (Next.js + Supabase) pensada para uso diario:
+
+- Login con email/contraseña
+- Cuentas con saldo inicial
+- Categorías (plantillas) con dirección (Ingreso/Gasto) e importe
+- Movimientos del mes (fijos por plantilla + variables)
+- Transferencias entre cuentas
+- Resumen mensual con cierre (locking) por cuenta
+
+## Stack
+
+- Next.js 14 (App Router) + React + TypeScript
+- Supabase:
+  - Auth (email/password, confirmación por email, recuperación de contraseña)
+  - Postgres + PostgREST
+
+## Requisitos
+
+- Node.js 18+
+- Una cuenta/proyecto en Supabase
+
+## Arrancar en local
+
+1) Instalar dependencias
 
 ```bash
 npm install
+```
+
+2) Configurar variables de entorno
+
+Crea el archivo `.env.local` en la raíz del repo con:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=https://TU-PROYECTO.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=TU_ANON_KEY
+
+# Opcional: URL pública donde vive la app (recomendado para enlaces de email)
+# NEXT_PUBLIC_APP_URL=https://finanzapp-delta.vercel.app
+```
+
+3) Ejecutar
+
+```bash
 npm run dev
 ```
 
 Abre http://localhost:3000
 
-## Supabase (SQL / migraciones)
-
-Si usas Supabase como backend, algunas mejoras de UX requieren pequeñas migraciones (por ejemplo, soportar "movimientos fijos" con importe por defecto).
-
-Ver: [docs/supabase-migrations.md](docs/supabase-migrations.md)
-
-## Commit y push (GitHub)
-
-Si ya tienes el repo creado en GitHub:
+## Scripts útiles
 
 ```bash
-git add .
-git commit -m "Inicial: PWA FinanzApp con IndexedDB (Dexie) y resumen tipo Excel"
-git push -u origin main
+npm run dev      # desarrollo
+npm run build    # build producción
+npm run start    # servir build (requiere build)
+npm run lint     # lint
 ```
 
-Si clonas un repo vacío:
+## Base de datos (Supabase)
 
-```bash
-git clone https://github.com/raulruiz78/finanzapp.git
-cd finanzapp
-```
+El esquema y migraciones viven en:
 
-Si el `git push` falla con error 128, suele ser por autenticación/permisos (HTTPS sin token, o falta de acceso). Opciones típicas:
-- Autenticación con GitHub CLI: `gh auth login`
-- Cambiar a SSH: `git remote set-url origin git@github.com:raulruiz78/finanzapp.git` (y configurar tu clave SSH)
+- `database/database.sql`
 
-## iPhone / iOS (PWA real)
+### Opción A — Proyecto nuevo (recomendado)
 
-Para instalar en iOS necesitas servirlo por HTTPS (localhost no vale en el iPhone).
+1) Crea un proyecto en Supabase.
+2) En Supabase → SQL Editor, ejecuta el bloque **SCHEMA (fresh install only)** de `database/database.sql`.
+3) Ejecuta también el bloque **MULTI-USER SAFETY (RLS)** (si no lo has incluido ya).
 
-Lo más cómodo: desplegar en Vercel (gratis) o Netlify.
+### Opción B — Proyecto ya existente
 
-En iPhone:
-1. Abre la URL en Safari
-2. Compartir → Añadir a pantalla de inicio
+En Supabase → SQL Editor, ejecuta el bloque **MIGRATION (existing DB)** de `database/database.sql`.
 
-## Backup (siguiente mejora recomendada)
+Ese bloque hace dos cosas importantes:
 
-Ahora mismo los datos no se pierden en ese dispositivo, pero si cambias de móvil, pierdes el IndexedDB. Lo normal es añadir:
-- Export/Import JSON (backup manual)
-- o Sync (Drive/iCloud/API)_
+1) Asegura la relación necesaria para que PostgREST pueda hacer el join `transactions -> categories`.
+2) Activa **RLS (Row Level Security)** y crea policies para que cada usuario sólo vea y modifique sus propios datos.
 
-A ver, vamos a hacer un cambio grandre, esto es web, pero lo que quiero es otra cosa, vamos a rehacer esto entero. 
+### Por qué es clave activar RLS
 
-yo quiero un app, que sea comoda de usar. Para ello queremos un login, con cuenta y usuario para memoria. 
+Sin RLS, aunque la app filtre por `user_id`, un usuario podría consultar/editar filas de otro usuario llamando a la API directamente.
+Con RLS, Supabase aplica la seguridad en la base de datos.
 
-una vez tenemos esto, El usuario añadirá una cuenta, indicando el dinero actual de esta cuenta.
+## Configuración de Auth (Supabase)
 
-el usuario puede añadir tantas cuentas como quiera y posteriormente podria borrarlas tambien desde ajuste de sus cuentas.
+En Supabase → Authentication → URL Configuration:
 
-una vez tiene eso, ya cada usuario cada mes podra ir añaddiendo los tipos de movimiento en las cuentas que desee, siguiendo los tipos que indique antes. 
+- **Site URL**: tu dominio principal (por ejemplo `https://finanzapp-delta.vercel.app`)
+- **Additional Redirect URLs**: añade estos endpoints:
+  - `https://TU-DOMINIO/auth/callback` (confirmación email / OAuth callback)
+  - `https://TU-DOMINIO/auth/reset` (recuperación de contraseña)
 
-Sabuendo esto, se ira recalculando el con cuanto inicial el mes, lo que se estima con los gastos añadidos, y si hay un gasto variable, el ajuste nuevo en esa cuenta 
+Notas:
+
+- Los enlaces de recuperación/confirmación pueden venir como `?code=...`, `?token_hash=...&type=...` o en el hash `#access_token=...`. La app soporta los tres.
+- Si pruebas en local y abres el email en el móvil, `localhost` no funcionará. Para pruebas reales usa el dominio de Vercel o un túnel.
+
+## Deploy en Vercel
+
+1) Importa el repo en Vercel.
+2) Configura las variables de entorno en Vercel (Project → Settings → Environment Variables):
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- (opcional) `NEXT_PUBLIC_APP_URL` con el dominio de producción
+
+3) Despliega.
+4) Vuelve a Supabase y asegúrate de que **Site URL** y **Redirect URLs** coinciden con el dominio final.
+
+## Funcionalidades (versión actual)
+
+- **Login**: registro, login, confirmación por email, recuperar contraseña.
+- **Cuentas**: crear/borrar cuentas y ver saldo vivo.
+- **Categorías**: plantillas por dirección (Ingreso/Gasto), ocultando categorías internas.
+- **Movimientos**: alta rápida de fijos desde plantillas y alta de variables por dirección.
+- **Transferencias**: entre cuentas, sin crear categorías “especiales” visibles.
+- **Mensual**: resumen por cuenta, definir saldo inicial del mes, cerrar/desbloquear mes.
+
+## Troubleshooting
+
+- **Veo datos de otros usuarios**: ejecuta el bloque **MULTI-USER SAFETY (RLS)** de `database/database.sql` en tu Supabase.
+- **Error de relación transactions → categories**: ejecuta el bloque **MIGRATION (existing DB)** (incluye creación de FK) en `database/database.sql`.
+- **El link de recuperar contraseña dice que falta código**: Supabase puede mandar el token en otro formato; despliega la versión actual y reenvía el email.
