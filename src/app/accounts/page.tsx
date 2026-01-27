@@ -16,7 +16,21 @@ export default function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [deltaByAccount, setDeltaByAccount] = useState<Record<string, number>>({});
   const [name, setName] = useState("");
-  const [balance, setBalance] = useState<number>(0);
+  const [balance, setBalance] = useState<string>("0");
+
+  function parseNonNegativeMoney(raw: string): number | null {
+    const normalized = String(raw ?? "")
+      .trim()
+      .replace(/\s+/g, "")
+      .replace(",", ".");
+
+    if (normalized === "") return 0;
+
+    const n = Number(normalized);
+    if (!Number.isFinite(n)) return null;
+    if (n < 0) return null;
+    return n;
+  }
 
   async function loadAccounts() {
     if (!supabase) return;
@@ -56,6 +70,9 @@ export default function AccountsPage() {
   async function createAccount() {
     if (!name.trim()) return alert("Nombre requerido");
 
+    const parsedBalance = parseNonNegativeMoney(balance);
+    if (parsedBalance === null) return alert("Saldo inicial inválido. Debe ser un número mayor o igual que 0.");
+
     if (!supabase) return;
 
     const { data: session } = await supabase.auth.getSession();
@@ -63,14 +80,14 @@ export default function AccountsPage() {
 
     const { error } = await supabase.from("accounts").insert({
       name,
-      current_balance: balance,
+      current_balance: parsedBalance,
       user_id: session.session.user.id,
     });
 
     if (error) return alert(error.message);
 
     setName("");
-    setBalance(0);
+    setBalance("0");
     loadAccounts();
   }
 
@@ -141,11 +158,12 @@ export default function AccountsPage() {
               Saldo Inicial
             </label>
             <input
-              type="number"
-              step="0.01"
+              type="text"
+              inputMode="decimal"
+              pattern="[0-9]*[\.,]?[0-9]*"
               placeholder="0.00"
-              value={balance || 0}
-              onChange={(e) => setBalance(Number(e.target.value))}
+              value={balance}
+              onChange={(e) => setBalance(e.target.value)}
               style={{ width: "100%" }}
             />
           </div>
