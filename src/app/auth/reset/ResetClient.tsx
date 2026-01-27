@@ -5,11 +5,22 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { supabase, supabaseConfigured } from "@/lib/supabase";
 import { useRequireSupabaseConfigured } from "@/lib/useRequireSupabaseConfigured";
 
+function parseHashParams(hash: string) {
+  const raw = hash.startsWith("#") ? hash.slice(1) : hash;
+  const params = new URLSearchParams(raw);
+  const access_token = params.get("access_token");
+  const refresh_token = params.get("refresh_token");
+  const type = params.get("type");
+  return { access_token, refresh_token, type };
+}
+
 export default function ResetClient() {
   const configured = useRequireSupabaseConfigured("/");
   const router = useRouter();
   const searchParams = useSearchParams();
   const code = searchParams.get("code");
+  const token_hash = searchParams.get("token_hash");
+  const typeParam = searchParams.get("type");
 
   const [password, setPassword] = useState<string>("");
   const [password2, setPassword2] = useState<string>("");
@@ -25,14 +36,29 @@ export default function ResetClient() {
 
     (async () => {
       try {
-        if (!code) {
-          setStatus("error");
-          setMessage("Falta el código de recuperación en la URL.");
-          return;
+        // 1) PKCE flow: /auth/reset?code=...
+        if (code) {
+          const { error } = await supabase!.auth.exchangeCodeForSession(code);
+          if (error) throw error;
+        } else if (token_hash) {
+          // 2) Token-hash flow: /auth/reset?token_hash=...&type=recovery
+          const type = (typeParam || "recovery") as any;
+          const { error } = await supabase!.auth.verifyOtp({ token_hash, type });
+          if (error) throw error;
+        } else {
+          // 3) Implicit flow: /auth/reset#access_token=...&refresh_token=...
+          const { access_token, refresh_token } = parseHashParams(window.location.hash);
+          if (access_token && refresh_token) {
+            const { error } = await supabase!.auth.setSession({ access_token, refresh_token });
+            if (error) throw error;
+          } else {
+            setStatus("error");
+            setMessage(
+              "El enlace de recuperación no trae credenciales (code/token_hash/access_token). Pide un nuevo email de recuperación e inténtalo de nuevo."
+            );
+            return;
+          }
         }
-
-        const { error } = await supabase!.auth.exchangeCodeForSession(code);
-        if (error) throw error;
 
         const { data } = await supabase!.auth.getSession();
         if (!data.session) {
@@ -53,7 +79,7 @@ export default function ResetClient() {
     return () => {
       cancelled = true;
     };
-  }, [hasSupabase, code]);
+  }, [hasSupabase, code, token_hash, typeParam]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();

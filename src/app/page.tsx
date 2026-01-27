@@ -104,19 +104,16 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=...
             <div className={styles.logo} aria-hidden />
             <div>
               <h1 className={styles.title}>FinanzApp</h1>
-              <p className={styles.subtitle}>Controla ingresos, gastos y transferencias</p>
+              <p className={styles.subtitle}>Tus finanzas claras, en 1 minuto al día</p>
             </div>
           </div>
 
           <ul className={styles.bullets}>
-            <li>Dashboard con saldo y movimientos</li>
-            <li>Categorías y cuentas configurables</li>
-            <li>Recuperación de contraseña por email</li>
+            <li>Visualiza tu saldo real por cuenta</li>
+            <li>Registra ingresos, gastos y transferencias</li>
+            <li>Resumen mensual para ver en qué se va el dinero</li>
+            <li>Categorías limpias y rápidas de gestionar</li>
           </ul>
-
-          <p className={styles.note}>
-            Nota: en Supabase debes permitir los redirects a <code>/auth/callback</code> y <code>/auth/reset</code>.
-          </p>
         </div>
 
         <div className={styles.card}>
@@ -181,6 +178,10 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=...
                 {busy === "reset" ? "Enviando email…" : "He olvidado mi contraseña"}
               </button>
             </div>
+
+            <p className={styles.note}>
+              Si usas emails de confirmación de Supabase, revisa que tus Redirect URLs apunten a tu dominio.
+            </p>
           </div>
         </div>
       </section>
