@@ -43,6 +43,12 @@ npm run dev
 
 Abre http://localhost:3000
 
+## Supabase (SQL / migraciones)
+
+Si usas Supabase como backend, algunas mejoras de UX requieren pequeñas migraciones (por ejemplo, soportar "movimientos fijos" con importe por defecto).
+
+Ver: [docs/supabase-migrations.md](docs/supabase-migrations.md)
+
 ## Commit y push (GitHub)
 
 Si ya tienes el repo creado en GitHub:

@@ -1,49 +1,78 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "rruiz/lib/supabase";
-
-type Direction = "INCOME" | "EXPENSE";
-type Bucket = "FIXED" | "VARIABLE" | "TRANSFER" | "OTHER";
-
-type Category = {
-  id: string;
-  name: string;
-  direction: Direction;
-  bucket: Bucket;
-  created_at: string;
-};
+import { supabase, supabaseConfigured } from "@/lib/supabase";
+import { useRequireSupabaseConfigured } from "@/lib/useRequireSupabaseConfigured";
+import { isInternalCategoryName } from "@/lib/internalCategories";
+import type { Category, Direction } from "@/lib/types";
 
 const directionLabels: Record<Direction, string> = {
   INCOME: "📥 Ingreso",
   EXPENSE: "📤 Gasto",
 };
 
-const bucketLabels: Record<Bucket, string> = {
-  FIXED: "Fijo",
-  VARIABLE: "Variable",
-  TRANSFER: "Transferencia",
-  OTHER: "Otro",
-};
-
-const bucketColors: Record<Bucket, string> = {
-  FIXED: "var(--danger)",
-  VARIABLE: "var(--warning)",
-  TRANSFER: "var(--info)",
-  OTHER: "var(--text-secondary)",
-};
-
 export default function CategoriesPage() {
+  const configured = useRequireSupabaseConfigured("/");
   const [categories, setCategories] = useState<Category[]>([]);
   const [name, setName] = useState("");
+  const [amount, setAmount] = useState<string>("");
   const [direction, setDirection] = useState<Direction>("EXPENSE");
-  const [bucket, setBucket] = useState<Bucket>("OTHER");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [editAmount, setEditAmount] = useState<string>("");
   const [editDirection, setEditDirection] = useState<Direction>("EXPENSE");
-  const [editBucket, setEditBucket] = useState<Bucket>("OTHER");
+
+  function normalizeName(raw: string) {
+    return raw
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu, "");
+  }
+
+
+  function categoryIcon(categoryName: string) {
+    const n = normalizeName(categoryName);
+    if (!n) return "💰";
+
+    // Streaming / subscriptions
+    if (n.includes("netflix")) return "🎬";
+    if (n.includes("prime video") || n.includes("amazon prime") || n === "prime") return "📦";
+    if (n.includes("disney")) return "🏰";
+    if (n.includes("hbo") || n.includes("max")) return "📺";
+    if (n.includes("spotify")) return "🎵";
+
+    // Home & utilities
+    if (n.includes("alquiler") || n.includes("renta") || n.includes("hipoteca")) return "🏠";
+    if (n.includes("luz") || n.includes("electric") || n.includes("energia")) return "⚡";
+    if (n.includes("agua")) return "💧";
+    if (n.includes("gas")) return "🔥";
+    if (n.includes("internet") || n.includes("fibra") || n.includes("movil") || n.includes("telefono")) return "📶";
+
+    return "💰";
+  }
+
+  function sanitizeAmountInput(raw: string) {
+    // allow digits + decimal separators, disallow negatives
+    let v = raw.replace(/[^0-9.,]/g, "");
+    // keep only the first separator
+    const firstSep = v.search(/[.,]/);
+    if (firstSep !== -1) {
+      const head = v.slice(0, firstSep + 1);
+      const tail = v.slice(firstSep + 1).replace(/[.,]/g, "");
+      v = head + tail;
+    }
+    return v;
+  }
+
+  function parseAmount(value: string) {
+    const normalized = value.replace(",", ".").trim();
+    const num = Number.parseFloat(normalized);
+    return Number.isFinite(num) ? num : NaN;
+  }
 
   async function load() {
+    if (!supabase) return;
     const { data, error } = await supabase
       .from("categories")
       .select("*")
@@ -55,50 +84,65 @@ export default function CategoriesPage() {
 
   async function create() {
     if (!name.trim()) return alert("Nombre requerido");
+    if (isInternalCategoryName(name)) return alert("Nombre reservado (interno del sistema).");
+    const amt = parseAmount(amount);
+    if (!Number.isFinite(amt) || amt <= 0) return alert("Importe requerido (debe ser > 0)");
+
+    if (!supabase) return;
 
     const { data: session } = await supabase.auth.getSession();
     if (!session?.session?.user?.id) return alert("No autenticado");
 
-    const { error } = await supabase.from("categories").insert({
+    const payload: any = {
       name: name.trim(),
       direction,
-      bucket,
+      amount: amt,
       user_id: session.session.user.id,
-    });
+    };
+
+    const { error } = await supabase.from("categories").insert(payload);
 
     if (error) return alert(error.message);
 
     setName("");
+    setAmount("");
     setDirection("EXPENSE");
-    setBucket("OTHER");
     await load();
   }
 
   function startEdit(c: Category) {
+    if (isInternalCategoryName(c.name)) return;
     setEditingId(c.id);
     setEditName(c.name);
+    setEditAmount(String(Number(c.amount ?? 0)));
     setEditDirection(c.direction);
-    setEditBucket(c.bucket);
   }
 
   function cancelEdit() {
     setEditingId(null);
     setEditName("");
+    setEditAmount("");
     setEditDirection("EXPENSE");
-    setEditBucket("OTHER");
   }
 
   async function saveEdit() {
     if (!editingId) return;
     if (!editName.trim()) return alert("Nombre requerido");
+    if (isInternalCategoryName(editName)) return alert("Nombre reservado (interno del sistema).");
+    const amt = parseAmount(editAmount);
+    if (!Number.isFinite(amt) || amt <= 0) return alert("Importe requerido (debe ser > 0)");
+
+    if (!supabase) return;
+
+    const payload: any = {
+      name: editName.trim(),
+      direction: editDirection,
+      amount: amt,
+    };
 
     const { error } = await supabase
       .from("categories")
-      .update({
-        name: editName.trim(),
-        direction: editDirection,
-        bucket: editBucket,
-      })
+      .update(payload)
       .eq("id", editingId);
 
     if (error) return alert(error.message);
@@ -108,51 +152,85 @@ export default function CategoriesPage() {
   }
 
   async function remove(id: string) {
-    if (!confirm("¿Borrar este tipo?")) return;
+    if (!confirm("¿Borrar esta plantilla?")) return;
 
-    const { error } = await supabase.from("categories").delete().eq("id", id);
-    if (error) alert(error.message);
-    else load();
-  }
-
-  async function seedDefaults() {
-    const defaults: Array<{ name: string; direction: Direction; bucket: Bucket }> = [
-      { name: "Nómina", direction: "INCOME", bucket: "OTHER" },
-      { name: "Ingreso", direction: "INCOME", bucket: "OTHER" },
-      { name: "Domiciliado", direction: "EXPENSE", bucket: "FIXED" },
-      { name: "Gasto variable", direction: "EXPENSE", bucket: "VARIABLE" },
-      { name: "Transferencia", direction: "EXPENSE", bucket: "TRANSFER" }
-    ];
+    if (!supabase) return;
 
     const { data: session } = await supabase.auth.getSession();
-    if (!session?.session?.user?.id) return alert("No autenticado");
+    const userId = session?.session?.user?.id;
+    if (!userId) return alert("No autenticado");
 
-    const existingNames = new Set(categories.map((c) => c.name.toLowerCase()));
-    const toInsert = defaults
-      .filter((d) => !existingNames.has(d.name.toLowerCase()))
-      .map((d) => ({ ...d, user_id: session.session.user.id }));
-    
-    if (toInsert.length === 0) return;
+    const { count, error: countErr } = await supabase
+      .from("transactions")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("category_id", id);
 
-    const { error } = await supabase.from("categories").insert(toInsert);
-    if (error) return alert(error.message);
+    if (countErr) return alert(countErr.message);
 
-    await load();
+    const txCount = count ?? 0;
+    if (txCount > 0) {
+      const answer = prompt(
+        `No se puede borrar: hay ${txCount} movimiento(s) usando esta categoría.\n\n` +
+          `Opciones:\n` +
+          `- Escribe el NOMBRE de la categoría destino para reasignar esos movimientos\n\n` +
+          `Deja vacío para cancelar:`
+      );
+
+      if (!answer?.trim()) return;
+
+      const dest = visibleCategories.find((c) => c.id !== id && c.name.trim().toLowerCase() === answer.trim().toLowerCase());
+
+      if (!dest) {
+        return alert("Categoría destino no encontrada. Revisa el nombre exacto o créala primero.");
+      }
+
+      const ok = confirm(
+        `Se reasignarán ${txCount} movimiento(s) a \"${dest.name}\" y luego se borrará la categoría. ¿Continuar?`
+      );
+      if (!ok) return;
+
+      const { error: updErr } = await supabase
+        .from("transactions")
+        .update({ category_id: dest.id })
+        .eq("user_id", userId)
+        .eq("category_id", id);
+
+      if (updErr) return alert(updErr.message);
+    }
+
+    const { error } = await supabase
+      .from("categories")
+      .delete()
+      .eq("user_id", userId)
+      .eq("id", id);
+
+    if (error) alert(error.message);
+    else load();
   }
 
   useEffect(() => {
     load();
   }, []);
 
-  const grouped = useMemo(() => {
-    const map = new Map<string, Category[]>();
-    for (const c of categories) {
-      const key = `${c.direction} / ${c.bucket}`;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(c);
-    }
-    return Array.from(map.entries());
+  const visibleCategories = useMemo(() => {
+    return categories.filter((c) => !isInternalCategoryName(c.name));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [categories]);
+
+  const grouped = useMemo(() => {
+    const map = new Map<Direction, Category[]>();
+    for (const c of visibleCategories) {
+      if (!map.has(c.direction)) map.set(c.direction, []);
+      map.get(c.direction)!.push(c);
+    }
+    const entries: Array<[string, Category[]]> = Array.from(map.entries()).map(([k, v]) => [k, v]);
+    entries.sort((a, b) => a[0].localeCompare(b[0]));
+    for (const [, list] of entries) list.sort((a, b) => a.name.localeCompare(b.name));
+    return entries;
+  }, [visibleCategories]);
+
+  if (!configured || !supabaseConfigured) return null;
 
   return (
     <main style={{ maxWidth: 1000, margin: "0 auto", padding: "3rem 2rem" }}>
@@ -162,11 +240,11 @@ export default function CategoriesPage() {
       </div>
 
       <p style={{ marginBottom: "2rem", color: "var(--text-secondary)" }}>
-        Organiza tus ingresos y gastos en categorías para mejor control
+        Define plantillas (importe + dirección) para añadir movimientos con 1 click desde Movimientos.
       </p>
 
       <section style={{ marginBottom: "2rem" }}>
-        <h3 style={{ marginBottom: "1.5rem" }}>➕ Nueva Categoría</h3>
+        <h3 style={{ marginBottom: "1.5rem" }}>➕ Nuevo tipo</h3>
 
         {editingId && (
           <div style={{ background: "var(--surface-hover)", padding: "1.5rem", borderRadius: "0.75rem", marginBottom: "1.5rem", border: "2px solid var(--warning)" }}>
@@ -177,12 +255,14 @@ export default function CategoriesPage() {
                 <option value="INCOME">📥 Ingreso</option>
                 <option value="EXPENSE">📤 Gasto</option>
               </select>
-              <select value={editBucket} onChange={(e) => setEditBucket(e.target.value as Bucket)}>
-                <option value="FIXED">Fijo</option>
-                <option value="VARIABLE">Variable</option>
-                <option value="TRANSFER">Transferencia</option>
-                <option value="OTHER">Otro</option>
-              </select>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={editAmount}
+                onChange={(e) => setEditAmount(sanitizeAmountInput(e.target.value))}
+                placeholder="Importe"
+                title="Importe de la plantilla"
+              />
               <button onClick={saveEdit} style={{ background: "var(--success)", color: "white" }}>✅ Guardar</button>
               <button onClick={cancelEdit} style={{ background: "var(--text-secondary)", color: "white" }}>❌ Cancelar</button>
             </div>
@@ -191,7 +271,7 @@ export default function CategoriesPage() {
 
         <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr auto", gap: "1rem" }}>
           <input
-            placeholder="Nombre (Alquiler, Netflix, Supermercado...)"
+            placeholder="Nombre (Nómina, Netflix, Alquiler...)"
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
@@ -199,33 +279,30 @@ export default function CategoriesPage() {
             <option value="INCOME">📥 Ingreso</option>
             <option value="EXPENSE">📤 Gasto</option>
           </select>
-          <select value={bucket} onChange={(e) => setBucket(e.target.value as Bucket)}>
-            <option value="FIXED">Fijo</option>
-            <option value="VARIABLE">Variable</option>
-            <option value="TRANSFER">Transferencia</option>
-            <option value="OTHER">Otro</option>
-          </select>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => setAmount(sanitizeAmountInput(e.target.value))}
+            placeholder="Importe"
+            title="Importe de la plantilla"
+          />
           <button onClick={create} style={{ background: "linear-gradient(135deg, var(--success) 0%, #34d399 100%)", color: "white" }}>
             ➕ Crear
           </button>
         </div>
-
-        <button onClick={seedDefaults} style={{ marginTop: "1rem", background: "var(--primary)", color: "white" }}>
-          📋 Cargar categorías por defecto
-        </button>
       </section>
 
       <section>
-        <h3 style={{ marginBottom: "1.5rem" }}>📚 Mis Categorías ({categories.length})</h3>
+        <h3 style={{ marginBottom: "1.5rem" }}>📚 Mis Categorías ({visibleCategories.length})</h3>
 
-        {categories.length === 0 ? (
+        {visibleCategories.length === 0 ? (
           <div style={{ padding: "2rem", textAlign: "center", color: "var(--text-secondary)" }}>
             <p style={{ fontSize: "2.5rem", marginBottom: "0.5rem" }}>📭</p>
-            <p>No tienes categorías. Crea una o pulsa "Cargar categorías por defecto"</p>
+            <p>No tienes plantillas todavía. Crea una arriba.</p>
           </div>
         ) : (
           grouped.map(([group, items]) => {
-            const [direction, bucket] = group.split(" / ");
             return (
               <div key={group} style={{ marginBottom: "2.5rem" }}>
                 <div style={{
@@ -237,9 +314,9 @@ export default function CategoriesPage() {
                   borderBottom: "2px solid var(--border)"
                 }}>
                   <div style={{ fontSize: "1.5rem" }}>
-                    {direction === "INCOME" ? "📥" : "📤"}
+                    {group === "INCOME" ? "📥" : "📤"}
                   </div>
-                  <h4 style={{ margin: 0 }}>{group}</h4>
+                  <h4 style={{ margin: 0 }}>{group === "INCOME" ? "Ingresos" : "Gastos"}</h4>
                   <div style={{ marginLeft: "auto", color: "var(--text-secondary)", fontSize: "0.9rem" }}>
                     {items.length} categoría{items.length !== 1 ? "s" : ""}
                   </div>
@@ -266,17 +343,19 @@ export default function CategoriesPage() {
                         e.currentTarget.style.boxShadow = "var(--shadow)";
                       }}
                     >
-                      <h5 style={{ marginBottom: "0.75rem", fontSize: "1rem" }}>{c.name}</h5>
+                      <h5 style={{ marginBottom: "0.75rem", fontSize: "1rem" }}>
+                        {categoryIcon(c.name)} {c.name}
+                      </h5>
                       <div style={{ marginBottom: "1rem", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
                         <span style={{
                           fontSize: "0.75rem",
                           padding: "0.25rem 0.75rem",
-                          background: bucketColors[c.bucket],
+                          background: c.direction === "INCOME" ? "var(--success)" : "var(--danger)",
                           color: "white",
                           borderRadius: "9999px",
                           fontWeight: "600"
                         }}>
-                          {bucketLabels[c.bucket]}
+                          {Number(c.amount || 0).toFixed(2)}€
                         </span>
                       </div>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>

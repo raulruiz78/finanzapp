@@ -1,15 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "rruiz/lib/supabase";
-
-type Account = { id: string; name: string; current_balance: number };
-type Category = {
-  id: string;
-  name: string;
-  direction: "INCOME" | "EXPENSE";
-  bucket: "FIXED" | "VARIABLE" | "TRANSFER" | "OTHER";
-};
+import { supabase, supabaseConfigured } from "@/lib/supabase";
+import { useRequireSupabaseConfigured } from "@/lib/useRequireSupabaseConfigured";
+import { humanizeSupabaseSchemaError } from "@/lib/supabaseErrorMessage";
+import type { Account, CategoryJoin, OneOrMany } from "@/lib/types";
 
 type Tx = {
   id: string;
@@ -17,6 +12,9 @@ type Tx = {
   account_id: string;
   category_id: string;
   amount: number;
+  description?: string | null;
+  transfer_group_id?: string | null;
+  categories?: OneOrMany<CategoryJoin> | null;
 };
 
 type MonthBalance = {
@@ -48,39 +46,42 @@ function round2(n: number) {
 }
 
 export default function MonthlyPage() {
+  const configured = useRequireSupabaseConfigured("/");
   const [ym, setYm] = useState(currentYM());
 
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
   const [txs, setTxs] = useState<Tx[]>([]);
   const [balances, setBalances] = useState<MonthBalance[]>([]);
   const [prevBalances, setPrevBalances] = useState<MonthBalance[]>([]);
 
   async function loadBase() {
-    const [{ data: acc, error: accErr }, { data: cat, error: catErr }] = await Promise.all([
-      supabase.from("accounts").select("id,name,current_balance").order("created_at"),
-      supabase.from("categories").select("id,name,direction,bucket").order("created_at"),
-    ]);
+    if (!supabase) return;
+    const { data: acc, error: accErr } = await supabase
+      .from("accounts")
+      .select("id,name,current_balance")
+      .order("created_at");
     if (accErr) alert(accErr.message);
-    if (catErr) alert(catErr.message);
 
     setAccounts((acc as Account[]) || []);
-    setCategories((cat as Category[]) || []);
   }
 
   async function loadMonth() {
     if (!isValidYM(ym)) return;
+    if (!supabase) return;
 
     const p = prevYM(ym);
 
     const [{ data: t, error: txErr }, { data: b, error: bErr }, { data: pb, error: pbErr }] =
       await Promise.all([
-        supabase.from("transactions").select("id,ym,account_id,category_id,amount").eq("ym", ym),
+        supabase
+          .from("transactions")
+          .select("id,ym,account_id,category_id,amount,description,transfer_group_id,categories:categories(name,direction,amount)")
+          .eq("ym", ym),
         supabase.from("month_balances").select("id,account_id,ym,opening_balance,closing_balance,locked").eq("ym", ym),
         supabase.from("month_balances").select("id,account_id,ym,opening_balance,closing_balance,locked").eq("ym", p),
       ]);
 
-    if (txErr) alert(txErr.message);
+    if (txErr) alert(humanizeSupabaseSchemaError(txErr.message) ?? txErr.message);
     if (bErr) alert(bErr.message);
     if (pbErr) alert(pbErr.message);
 
@@ -94,15 +95,10 @@ export default function MonthlyPage() {
   }, []);
 
   useEffect(() => {
+    if (!configured || !supabaseConfigured) return;
     loadMonth();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ym]);
-
-  const catById = useMemo(() => {
-    const m = new Map<string, Category>();
-    for (const c of categories) m.set(c.id, c);
-    return m;
-  }, [categories]);
 
   const balanceByAccount = useMemo(() => {
     const m = new Map<string, MonthBalance>();
@@ -140,19 +136,26 @@ export default function MonthlyPage() {
 
       for (const t of txs) {
         if (t.account_id !== acc.id) continue;
-        const cat = catById.get(t.category_id);
-        if (!cat) continue;
-
+        const cat = Array.isArray(t.categories) ? t.categories[0] : t.categories;
         const amt = Number(t.amount);
+        const dir = cat?.direction;
+        const isTransfer = Boolean(t.transfer_group_id);
+        const isFixed =
+          !isTransfer &&
+          cat?.name &&
+          t.description &&
+          String(t.description).trim() === String(cat.name).trim() &&
+          Number(cat.amount ?? NaN) === amt;
 
-        if (cat.direction === "INCOME") {
-          income += amt;
-          if (cat.bucket === "TRANSFER") transferIn += amt;
+        if (dir === "INCOME") {
+          if (isTransfer) transferIn += amt;
+          else income += amt;
+        } else if (dir === "EXPENSE") {
+          if (isTransfer) transferOut += amt;
+          else if (isFixed) fixedOut += amt;
+          else variableOut += amt;
         } else {
-          if (cat.bucket === "FIXED") fixedOut += amt;
-          else if (cat.bucket === "VARIABLE") variableOut += amt;
-          else if (cat.bucket === "TRANSFER") transferOut += amt;
-          else otherOut += amt;
+          otherOut += 0;
         }
       }
 
@@ -174,10 +177,11 @@ export default function MonthlyPage() {
         otherOut: round2(otherOut),
       };
     });
-  }, [accounts, balanceByAccount, prevClosingByAccount, txs, catById]);
+  }, [accounts, balanceByAccount, prevClosingByAccount, txs]);
 
   async function upsertOpening(accountId: string, opening: number) {
     if (!isValidYM(ym)) return alert("Mes inválido");
+    if (!supabase) return;
     const current = balanceByAccount.get(accountId);
 
     if (current?.locked) {
@@ -226,12 +230,14 @@ export default function MonthlyPage() {
   }
 
   async function autofillFromPrev(accountId: string) {
+    if (!supabase) return;
     const prev = prevClosingByAccount.get(accountId);
     if (prev === undefined) return alert("No hay cierre del mes anterior para esta cuenta.");
     await upsertOpening(accountId, prev);
   }
 
   async function closeMonth(accountId: string) {
+    if (!supabase) return;
     const row = summary.find((s) => s.accountId === accountId);
     if (!row) return;
 
@@ -284,6 +290,7 @@ export default function MonthlyPage() {
   }
 
   async function unlockMonth(accountId: string) {
+    if (!supabase) return;
     const mb = balanceByAccount.get(accountId);
     if (!mb) return alert("No hay registro del mes. (Cierra el mes o define un inicial primero).");
     if (!confirm(`¿Desbloquear mes ${ym} para esta cuenta?`)) return;
@@ -296,6 +303,8 @@ export default function MonthlyPage() {
     if (error) alert(error.message);
     else loadMonth();
   }
+
+  if (!configured || !supabaseConfigured) return null;
 
   return (
     <main style={{ maxWidth: 1100, margin: "40px auto", fontFamily: "system-ui" }}>
