@@ -5,6 +5,7 @@ import { supabase, supabaseConfigured } from "@/lib/supabase";
 import { useRequireSupabaseConfigured } from "@/lib/useRequireSupabaseConfigured";
 import { humanizeSupabaseSchemaError } from "@/lib/supabaseErrorMessage";
 import type { Account, CategoryJoin, OneOrMany } from "@/lib/types";
+import { AppTopBar } from "@/app/ui/AppTopBar";
 
 type Tx = {
   id: string;
@@ -85,7 +86,9 @@ export default function MonthlyPage() {
       await Promise.all([
         supabase
           .from("transactions")
-          .select("id,ym,account_id,category_id,amount,description,transfer_group_id,categories:categories(name,direction,amount)")
+          .select(
+            "id,ym,account_id,category_id,amount,description,transfer_group_id,categories:categories(name,direction,amount,budget_bucket)"
+          )
           .eq("user_id", userId)
           .eq("ym", ym),
         supabase
@@ -147,8 +150,8 @@ export default function MonthlyPage() {
           : prevClosingByAccount.get(acc.id) ?? 0;
 
       let income = 0;
-      let fixedOut = 0;
-      let variableOut = 0;
+      let needsOut = 0;
+      let wantsOut = 0;
       let transferOut = 0;
       let transferIn = 0;
       let otherOut = 0;
@@ -159,27 +162,22 @@ export default function MonthlyPage() {
         const amt = Number(t.amount);
         const dir = cat?.direction;
         const isTransfer = Boolean(t.transfer_group_id);
-        const isFixed =
-          !isTransfer &&
-          cat?.name &&
-          t.description &&
-          String(t.description).trim() === String(cat.name).trim() &&
-          Number(cat.amount ?? NaN) === amt;
 
         if (dir === "INCOME") {
           if (isTransfer) transferIn += amt;
           else income += amt;
         } else if (dir === "EXPENSE") {
           if (isTransfer) transferOut += amt;
-          else if (isFixed) fixedOut += amt;
-          else variableOut += amt;
+          else if (cat?.budget_bucket === "NEEDS") needsOut += amt;
+          else if (cat?.budget_bucket === "WANTS") wantsOut += amt;
+          else wantsOut += amt;
         } else {
           otherOut += 0;
         }
       }
 
-      const estimated = opening + income - fixedOut - transferOut - otherOut + transferIn;
-      const fin = estimated - variableOut;
+      const estimated = opening + income - needsOut - transferOut - otherOut + transferIn;
+      const fin = estimated - wantsOut;
 
       return {
         accountId: acc.id,
@@ -189,10 +187,10 @@ export default function MonthlyPage() {
         estimated: round2(estimated),
         fin: round2(fin),
         income: round2(income),
-        fixedOut: round2(fixedOut),
+        needsOut: round2(needsOut),
         transferOut: round2(transferOut),
         transferIn: round2(transferIn),
-        variableOut: round2(variableOut),
+        wantsOut: round2(wantsOut),
         otherOut: round2(otherOut),
       };
     });
@@ -351,15 +349,13 @@ export default function MonthlyPage() {
 
   return (
     <main style={{ maxWidth: 1100, margin: "40px auto", fontFamily: "system-ui" }}>
-      <h1>Resumen mensual</h1>
+      <AppTopBar title="Mensual" icon="🗓️" iconLabel="Mensual" backHref="/dashboard" />
 
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <label>
           <div style={{ fontSize: 12, opacity: 0.7 }}>Mes (YYYY-MM)</div>
           <input value={ym} onChange={(e) => setYm(e.target.value)} placeholder="2026-01" />
         </label>
-
-        <a href="/dashboard" style={{ marginLeft: "auto" }}>← Volver</a>
       </div>
 
       <p style={{ opacity: 0.75, marginTop: 10 }}>
@@ -383,10 +379,10 @@ export default function MonthlyPage() {
               <th style={{ textAlign: "right" }}>Estimado</th>
               <th style={{ textAlign: "right" }}>Fin</th>
               <th style={{ textAlign: "right" }}>Ingresos</th>
-              <th style={{ textAlign: "right" }}>Fijos</th>
+              <th style={{ textAlign: "right" }}>Necesidades</th>
               <th style={{ textAlign: "right" }}>Transfer -</th>
               <th style={{ textAlign: "right" }}>Transfer +</th>
-              <th style={{ textAlign: "right" }}>Variable</th>
+              <th style={{ textAlign: "right" }}>Ocio</th>
               <th style={{ textAlign: "right" }}>Otros</th>
               <th></th>
             </tr>
@@ -419,10 +415,10 @@ export default function MonthlyPage() {
                 <td style={{ textAlign: "right" }}>{r.fin.toFixed(2)}</td>
 
                 <td style={{ textAlign: "right" }}>{r.income.toFixed(2)}</td>
-                <td style={{ textAlign: "right" }}>{r.fixedOut.toFixed(2)}</td>
+                <td style={{ textAlign: "right" }}>{r.needsOut.toFixed(2)}</td>
                 <td style={{ textAlign: "right" }}>{r.transferOut.toFixed(2)}</td>
                 <td style={{ textAlign: "right" }}>{r.transferIn.toFixed(2)}</td>
-                <td style={{ textAlign: "right" }}>{r.variableOut.toFixed(2)}</td>
+                <td style={{ textAlign: "right" }}>{r.wantsOut.toFixed(2)}</td>
                 <td style={{ textAlign: "right" }}>{r.otherOut.toFixed(2)}</td>
 
                 <td style={{ textAlign: "right" }}>
@@ -453,7 +449,7 @@ export default function MonthlyPage() {
 
       <div style={{ opacity: 0.75 }}>
         <strong>Regla:</strong>{" "}
-        Estimado = Inicial + Ingresos − Fijos − Transfer(−) − Otros + Transfer(+) · Fin = Estimado − Variable
+        Estimado = Inicial + Ingresos − Necesidades − Transfer(−) − Otros + Transfer(+) · Fin = Estimado − Ocio
       </div>
     </main>
   );

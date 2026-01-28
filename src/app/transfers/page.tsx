@@ -4,8 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase, supabaseConfigured } from "@/lib/supabase";
 import { useRequireSupabaseConfigured } from "@/lib/useRequireSupabaseConfigured";
 import { humanizeSupabaseSchemaError } from "@/lib/supabaseErrorMessage";
-import { VARIABLE_EXPENSE_NAME, VARIABLE_INCOME_NAME } from "@/lib/internalCategories";
+import { VARIABLE_EXPENSE_NEEDS_NAME, VARIABLE_INCOME_NAME } from "@/lib/internalCategories";
 import type { AccountLite, Category, CategoryJoin, AccountJoin, OneOrMany, Direction } from "@/lib/types";
+import { AppTopBar } from "@/app/ui/AppTopBar";
 
 type Account = AccountLite;
 
@@ -57,11 +58,11 @@ export default function TransfersPage() {
 
   async function ensureVariableCategoryId(userId: string, dir: "INCOME" | "EXPENSE") {
     if (!supabase) return null;
-    const name = dir === "INCOME" ? VARIABLE_INCOME_NAME : VARIABLE_EXPENSE_NAME;
+    const name = dir === "INCOME" ? VARIABLE_INCOME_NAME : VARIABLE_EXPENSE_NEEDS_NAME;
 
     const { data, error } = await supabase
       .from("categories")
-      .select("id,name,direction,amount")
+      .select("id,name,direction,amount,budget_bucket")
       .eq("user_id", userId)
       .eq("name", name)
       .maybeSingle();
@@ -75,6 +76,7 @@ export default function TransfersPage() {
       name,
       direction: dir,
       amount: 0.01,
+      budget_bucket: dir === "EXPENSE" ? "NEEDS" : null,
     });
     if (ins.error) return null;
 
@@ -97,7 +99,7 @@ export default function TransfersPage() {
 
     const [{ data: acc, error: accErr }, { data: cat, error: catErr }] = await Promise.all([
       supabase.from("accounts").select("id,name").eq("user_id", userId).order("created_at"),
-      supabase.from("categories").select("id,name,direction,amount").eq("user_id", userId).order("created_at"),
+      supabase.from("categories").select("id,name,direction,amount,budget_bucket").eq("user_id", userId).order("created_at"),
     ]);
 
     if (accErr) alert(accErr.message);
@@ -112,7 +114,7 @@ export default function TransfersPage() {
   }
 
   function pickVariableCategoryId(dir: "INCOME" | "EXPENSE") {
-    const preferredName = dir === "INCOME" ? VARIABLE_INCOME_NAME : VARIABLE_EXPENSE_NAME;
+    const preferredName = dir === "INCOME" ? VARIABLE_INCOME_NAME : VARIABLE_EXPENSE_NEEDS_NAME;
     return categories.find((c) => c.direction === dir && c.name === preferredName)?.id ?? null;
   }
 
@@ -255,10 +257,7 @@ export default function TransfersPage() {
 
   return (
     <main style={{ maxWidth: 1100, margin: "0 auto", padding: "3rem 2rem" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2rem" }}>
-        <h1>💸 Transferencias</h1>
-        <a href="/dashboard" style={{ color: "var(--primary)", fontWeight: "600" }}>← Volver</a>
-      </div>
+      <AppTopBar title="Transferencias" icon="💸" iconLabel="Transferencias" backHref="/dashboard" />
 
       <section style={{ marginBottom: "2rem" }}>
         <h3 style={{ marginBottom: "1.5rem" }}>🕐 Período</h3>

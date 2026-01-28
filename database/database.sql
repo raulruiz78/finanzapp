@@ -12,6 +12,30 @@
 
 begin;
 
+-- ==========================================
+-- ACCOUNTS: account type (Ahorro/Cotidiana/Extra)
+-- ==========================================
+
+-- Add column for existing DBs (safe / idempotent)
+alter table public.accounts
+  add column if not exists account_type text not null default 'COTIDIANA';
+
+-- Restrict values (safe / idempotent)
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'accounts_account_type_check'
+      and conrelid = 'public.accounts'::regclass
+  ) then
+    alter table public.accounts
+      add constraint accounts_account_type_check
+      check (account_type = any (array['AHORRO'::text, 'COTIDIANA'::text, 'EXTRA'::text]));
+  end if;
+end
+$$;
+
 -- Needed for gen_random_uuid() on fresh installs and some older projects.
 create extension if not exists pgcrypto;
 
@@ -19,13 +43,14 @@ create extension if not exists pgcrypto;
 -- the FK creation will fail. We auto-create placeholder categories for those IDs.
 --
 -- NOTE: categories.amount has a > 0 constraint, so we use 0.01.
-insert into public.categories (id, user_id, name, direction, amount, created_at, updated_at)
+insert into public.categories (id, user_id, name, direction, amount, budget_bucket, created_at, updated_at)
 select distinct on (t.category_id)
   t.category_id as id,
   t.user_id,
   'Migrated category ' || left(t.category_id::text, 8) as name,
   'EXPENSE' as direction,
   0.01 as amount,
+  'NEEDS' as budget_bucket,
   now() as created_at,
   now() as updated_at
 from public.transactions t
@@ -33,6 +58,55 @@ left join public.categories c on c.id = t.category_id
 where c.id is null
 order by t.category_id, t.created_at asc
 on conflict (id) do nothing;
+
+-- ==========================================
+-- CATEGORIES: budget bucket (NEEDS/WANTS)
+-- ==========================================
+
+alter table public.categories
+  add column if not exists budget_bucket text;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'categories_budget_bucket_check'
+      and conrelid = 'public.categories'::regclass
+  ) then
+    alter table public.categories
+      add constraint categories_budget_bucket_check
+      check (budget_bucket = any (array['NEEDS'::text, 'WANTS'::text]));
+  end if;
+end
+$$;
+
+-- Backfill for legacy data:
+-- - Expenses with a fixed amount => NEEDS
+-- - Expenses without amount      => WANTS
+update public.categories
+set budget_bucket = case
+  when direction = 'EXPENSE' and amount is not null then 'NEEDS'
+  when direction = 'EXPENSE' and amount is null then 'WANTS'
+  else budget_bucket
+end
+where direction = 'EXPENSE'
+  and budget_bucket is null;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'categories_budget_bucket_required_for_expense'
+      and conrelid = 'public.categories'::regclass
+  ) then
+    alter table public.categories
+      add constraint categories_budget_bucket_required_for_expense
+      check (direction <> 'EXPENSE' or budget_bucket is not null);
+  end if;
+end
+$$;
 
 -- Create FK only if it doesn't exist yet.
 do $$
@@ -60,11 +134,45 @@ create table if not exists public.profiles (
   first_name text,
   last_name text,
   full_name text,
+  plan_needs_pct integer not null default 50,
+  plan_wants_pct integer not null default 30,
+  plan_savings_pct integer not null default 20,
   created_at timestamp with time zone not null default now(),
   updated_at timestamp with time zone not null default now(),
   constraint profiles_pkey primary key (user_id),
   constraint profiles_user_id_fkey foreign key (user_id) references auth.users(id) on delete cascade
 );
+
+-- If profiles already existed, CREATE TABLE IF NOT EXISTS won't add columns.
+-- Add them explicitly for existing DBs (safe / idempotent).
+alter table public.profiles
+  add column if not exists plan_needs_pct integer not null default 50;
+
+alter table public.profiles
+  add column if not exists plan_wants_pct integer not null default 30;
+
+alter table public.profiles
+  add column if not exists plan_savings_pct integer not null default 20;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'profiles_budget_plan_check'
+      and conrelid = 'public.profiles'::regclass
+  ) then
+    alter table public.profiles
+      add constraint profiles_budget_plan_check
+      check (
+        plan_needs_pct between 0 and 100
+        and plan_wants_pct between 0 and 100
+        and plan_savings_pct between 0 and 100
+        and (plan_needs_pct + plan_wants_pct + plan_savings_pct) = 100
+      );
+  end if;
+end
+$$;
 
 create index if not exists profiles_user_id_idx on public.profiles (user_id);
 
@@ -293,6 +401,7 @@ CREATE TABLE IF NOT EXISTS public.accounts (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,
   name text NOT NULL,
+  account_type text NOT NULL DEFAULT 'COTIDIANA' CHECK (account_type = ANY (ARRAY['AHORRO'::text, 'COTIDIANA'::text, 'EXTRA'::text])),
   current_balance numeric NOT NULL DEFAULT 0,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
@@ -305,10 +414,19 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   first_name text,
   last_name text,
   full_name text,
+  plan_needs_pct integer NOT NULL DEFAULT 50,
+  plan_wants_pct integer NOT NULL DEFAULT 30,
+  plan_savings_pct integer NOT NULL DEFAULT 20,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT profiles_pkey PRIMARY KEY (user_id),
-  CONSTRAINT profiles_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE
+  CONSTRAINT profiles_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,
+  CONSTRAINT profiles_budget_plan_check CHECK (
+    plan_needs_pct BETWEEN 0 AND 100
+    AND plan_wants_pct BETWEEN 0 AND 100
+    AND plan_savings_pct BETWEEN 0 AND 100
+    AND (plan_needs_pct + plan_wants_pct + plan_savings_pct) = 100
+  )
 );
 
 create index if not exists profiles_user_id_idx on public.profiles (user_id);
@@ -384,8 +502,11 @@ CREATE TABLE IF NOT EXISTS public.categories (
   name text NOT NULL,
   direction text NOT NULL CHECK (direction = ANY (ARRAY['INCOME'::text, 'EXPENSE'::text])),
   amount numeric NOT NULL CHECK (amount > 0::numeric),
+  budget_bucket text,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT categories_budget_bucket_check CHECK (budget_bucket = ANY (ARRAY['NEEDS'::text, 'WANTS'::text])),
+  CONSTRAINT categories_budget_bucket_required_for_expense CHECK (direction <> 'EXPENSE'::text OR budget_bucket IS NOT NULL),
   CONSTRAINT categories_pkey PRIMARY KEY (id),
   CONSTRAINT categories_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
 );

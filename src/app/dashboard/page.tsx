@@ -6,6 +6,7 @@ import { useRequireSupabaseConfigured } from "@/lib/useRequireSupabaseConfigured
 import { humanizeSupabaseSchemaError } from "@/lib/supabaseErrorMessage";
 import { formatEUR } from "@/lib/format";
 import type { Account, CategoryJoin, OneOrMany } from "@/lib/types";
+import { AppTopBar } from "@/app/ui/AppTopBar";
 import styles from "./page.module.css";
 
 type Tx = {
@@ -23,6 +24,9 @@ type Profile = {
   first_name?: string | null;
   last_name?: string | null;
   full_name?: string | null;
+  plan_needs_pct?: number | null;
+  plan_wants_pct?: number | null;
+  plan_savings_pct?: number | null;
 };
 
 function currentYM() {
@@ -38,9 +42,9 @@ function isoDate(d: Date) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function minusOneMonth(date: Date) {
+function plusOneMonth(date: Date) {
   const d = new Date(date);
-  d.setMonth(d.getMonth() - 1);
+  d.setMonth(d.getMonth() + 1);
   return d;
 }
 
@@ -61,11 +65,16 @@ export default function Dashboard() {
   const [name, setName] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [ym] = useState(currentYM());
-  const [savingsFrom, setSavingsFrom] = useState(() => isoDate(minusOneMonth(new Date())));
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [deltasAll, setDeltasAll] = useState<Record<string, number>>({});
   const [monthTxs, setMonthTxs] = useState<Tx[]>([]);
   const [allTxs, setAllTxs] = useState<Tx[]>([]);
+  const [dashTab, setDashTab] = useState<"balances" | "cotidiana">("cotidiana");
+  const [showAmounts, setShowAmounts] = useState(false);
+  const [planNeedsPct, setPlanNeedsPct] = useState(50);
+  const [planWantsPct, setPlanWantsPct] = useState(30);
+  const [planSavingsPct, setPlanSavingsPct] = useState(20);
+  const [projectionFrom, setProjectionFrom] = useState(() => isoDate(new Date()));
 
   useEffect(() => {
     if (!supabase) return;
@@ -98,21 +107,27 @@ export default function Dashboard() {
         await Promise.all([
           supabase
             .from("accounts")
-            .select("id,name,current_balance")
+            .select("id,name,account_type,current_balance")
             .eq("user_id", userId)
             .order("created_at"),
           supabase
             .from("transactions")
-            .select("account_id,amount,ym,tx_date,created_at,transfer_group_id,categories:categories(direction)")
+            .select(
+              "account_id,amount,ym,tx_date,created_at,transfer_group_id,categories:categories(name,direction,budget_bucket)"
+            )
             .eq("user_id", userId),
           supabase
             .from("transactions")
             .select(
-              "account_id,amount,ym,tx_date,created_at,description,transfer_group_id,categories:categories(name,direction,amount)"
+              "account_id,amount,ym,tx_date,created_at,description,transfer_group_id,categories:categories(name,direction,amount,budget_bucket)"
             )
             .eq("user_id", userId)
             .eq("ym", ym),
-          supabase.from("profiles").select("first_name,last_name,full_name").eq("user_id", userId).maybeSingle(),
+          supabase
+            .from("profiles")
+            .select("first_name,last_name,full_name,plan_needs_pct,plan_wants_pct,plan_savings_pct")
+            .eq("user_id", userId)
+            .maybeSingle(),
         ]);
 
       if (accErr) alert(accErr.message);
@@ -131,6 +146,18 @@ export default function Dashboard() {
         (p?.full_name && String(p.full_name).trim()) ||
         fallbackName;
       if (!cancelled) setName(profileName);
+
+      if (!cancelled) {
+        const needs = Number(p?.plan_needs_pct);
+        const wants = Number(p?.plan_wants_pct);
+        const sav = Number(p?.plan_savings_pct);
+        const ok = [needs, wants, sav].every((n) => Number.isFinite(n)) && needs + wants + sav === 100;
+        if (ok) {
+          setPlanNeedsPct(needs);
+          setPlanWantsPct(wants);
+          setPlanSavingsPct(sav);
+        }
+      }
 
       const all = (((allTx as unknown) as Tx[]) || []);
       const deltas: Record<string, number> = {};
@@ -171,9 +198,188 @@ export default function Dashboard() {
       .sort((a, b) => b.live_balance - a.live_balance);
   }, [accounts, deltasAll]);
 
+  const maskedEUR = (value: number) => {
+    if (showAmounts) return formatEUR(value);
+    return "••••";
+  };
+
   const totalBalance = useMemo(() => {
     return accountsLive.reduce((sum, a) => sum + a.live_balance, 0);
   }, [accountsLive]);
+
+  const cotidianaAccountIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const a of accounts) {
+      const t = (a as any)?.account_type as string | undefined;
+      if (!t || t === "COTIDIANA") ids.add(a.id);
+    }
+    return ids;
+  }, [accounts]);
+
+  const accountsLiveCotidiana = useMemo(() => {
+    return accountsLive.filter((a) => cotidianaAccountIds.has(a.id));
+  }, [accountsLive, cotidianaAccountIds]);
+
+  const monthTxsCotidiana = useMemo(() => {
+    return monthTxs.filter((t) => cotidianaAccountIds.has(t.account_id));
+  }, [monthTxs, cotidianaAccountIds]);
+
+  const monthStatsCotidiana = useMemo(() => {
+    let income = 0;
+    let needsOut = 0;
+    let wantsOut = 0;
+    let otherOut = 0;
+    let transferOut = 0;
+    let transferIn = 0;
+
+    for (const t of monthTxsCotidiana) {
+      const cat = Array.isArray(t.categories) ? t.categories[0] : t.categories;
+      const dir = cat?.direction;
+      const amt = Number(t.amount) || 0;
+      const isTransfer = Boolean(t.transfer_group_id);
+
+      if (dir === "INCOME") {
+        if (isTransfer) transferIn += amt;
+        else income += amt;
+      } else if (dir === "EXPENSE") {
+        if (isTransfer) transferOut += amt;
+        else if (cat?.budget_bucket === "NEEDS") needsOut += amt;
+        else if (cat?.budget_bucket === "WANTS") wantsOut += amt;
+        else wantsOut += amt;
+      } else {
+        otherOut += 0;
+      }
+    }
+
+    const expensesNoTransfer = needsOut + wantsOut + otherOut;
+    const savings = income - expensesNoTransfer;
+
+    return {
+      income,
+      needsOut,
+      wantsOut,
+      otherOut,
+      transferOut,
+      transferIn,
+      expensesNoTransfer,
+      savings,
+    };
+  }, [monthTxsCotidiana]);
+
+  const savingsRateCotidiana = useMemo(() => {
+    if (!monthStatsCotidiana.income) return 0;
+    return Math.max(0, Math.min(1, monthStatsCotidiana.savings / monthStatsCotidiana.income));
+  }, [monthStatsCotidiana.income, monthStatsCotidiana.savings]);
+
+  const totalBalanceCotidiana = useMemo(() => {
+    return accountsLiveCotidiana.reduce((sum, a) => sum + a.live_balance, 0);
+  }, [accountsLiveCotidiana]);
+
+  const projectionTo = useMemo(() => {
+    const from = new Date(`${projectionFrom}T00:00:00`);
+    if (Number.isNaN(from.getTime())) return null;
+    return plusOneMonth(from);
+  }, [projectionFrom]);
+
+  const projectionBaseBalanceCotidiana = useMemo(() => {
+    const from = new Date(`${projectionFrom}T00:00:00`);
+    if (Number.isNaN(from.getTime())) return 0;
+
+    const deltaBefore: Record<string, number> = {};
+
+    for (const t of allTxs) {
+      if (!cotidianaAccountIds.has(t.account_id)) continue;
+      const d = t.tx_date ? new Date(`${t.tx_date}T00:00:00`) : t.created_at ? new Date(t.created_at) : null;
+      if (!d || Number.isNaN(d.getTime())) continue;
+      if (d >= from) continue;
+
+      const cat = Array.isArray(t.categories) ? t.categories[0] : t.categories;
+      const dir = cat?.direction;
+      const amt = Number(t.amount) || 0;
+
+      if (dir === "INCOME") deltaBefore[t.account_id] = (deltaBefore[t.account_id] || 0) + amt;
+      else if (dir === "EXPENSE") deltaBefore[t.account_id] = (deltaBefore[t.account_id] || 0) - amt;
+    }
+
+    let base = 0;
+    for (const a of accounts) {
+      if (!cotidianaAccountIds.has(a.id)) continue;
+      base += Number(a.current_balance || 0) + (deltaBefore[a.id] || 0);
+    }
+    return base;
+  }, [accounts, allTxs, cotidianaAccountIds, projectionFrom]);
+
+  const projectionStatsCotidiana = useMemo(() => {
+    const from = new Date(`${projectionFrom}T00:00:00`);
+    const to = projectionTo;
+    if (!to || Number.isNaN(from.getTime())) {
+      return {
+        fromLabel: projectionFrom,
+        toLabel: "",
+        startBalance: 0,
+        income: 0,
+        needsOut: 0,
+        wantsOut: 0,
+        savings: 0,
+        plannedNeeds: 0,
+        plannedWants: 0,
+        plannedSavings: 0,
+        needsRatio: 0,
+        wantsRatio: 0,
+        savingsRatio: 0,
+      };
+    }
+
+    let income = 0;
+    let needsOut = 0;
+    let wantsOut = 0;
+
+    for (const t of allTxs) {
+      if (!cotidianaAccountIds.has(t.account_id)) continue;
+      const d = t.tx_date ? new Date(t.tx_date) : t.created_at ? new Date(t.created_at) : null;
+      if (!d || Number.isNaN(d.getTime())) continue;
+      if (d < from || d > to) continue;
+
+      const cat = Array.isArray(t.categories) ? t.categories[0] : t.categories;
+      const dir = cat?.direction;
+      const amt = Number(t.amount) || 0;
+      const isTransfer = Boolean(t.transfer_group_id);
+      if (isTransfer) continue;
+
+      if (dir === "INCOME") income += amt;
+      else if (dir === "EXPENSE") {
+        if (cat?.budget_bucket === "NEEDS") needsOut += amt;
+        else if (cat?.budget_bucket === "WANTS") wantsOut += amt;
+        else wantsOut += amt;
+      }
+    }
+
+    const startBalance = Number(projectionBaseBalanceCotidiana || 0);
+    const plannedNeeds = (startBalance * planNeedsPct) / 100;
+    const plannedWants = (startBalance * planWantsPct) / 100;
+    const plannedSavings = (startBalance * planSavingsPct) / 100;
+    const savings = startBalance - (needsOut + wantsOut);
+
+    const needsRatio = plannedNeeds > 0 ? needsOut / plannedNeeds : 0;
+    const wantsRatio = plannedWants > 0 ? wantsOut / plannedWants : 0;
+    const savingsRatio = plannedSavings > 0 ? savings / plannedSavings : 0;
+
+    return {
+      fromLabel: projectionFrom,
+      toLabel: isoDate(to),
+      startBalance,
+      income,
+      needsOut,
+      wantsOut,
+      savings,
+      plannedNeeds,
+      plannedWants,
+      plannedSavings,
+      needsRatio,
+      wantsRatio,
+      savingsRatio,
+    };
+  }, [allTxs, cotidianaAccountIds, planNeedsPct, planSavingsPct, planWantsPct, projectionBaseBalanceCotidiana, projectionFrom, projectionTo]);
 
   const accountNameById = useMemo(() => {
     const map: Record<string, string> = {};
@@ -228,40 +434,108 @@ export default function Dashboard() {
     };
   }, [monthTxs]);
 
-  const rangeStats = useMemo(() => {
-    const from = new Date(`${savingsFrom}T00:00:00`);
-    const to = new Date();
-
-    let income = 0;
-    let expenses = 0;
-
-    for (const t of allTxs) {
-      const d = t.tx_date ? new Date(t.tx_date) : t.created_at ? new Date(t.created_at) : null;
-      if (!d || Number.isNaN(d.getTime())) continue;
-      if (d < from || d > to) continue;
-
-      const cat = Array.isArray(t.categories) ? t.categories[0] : t.categories;
-      const dir = cat?.direction;
-      const amt = Number(t.amount) || 0;
-      const isTransfer = Boolean(t.transfer_group_id);
-      if (isTransfer) continue;
-
-      if (dir === "INCOME") income += amt;
-      else if (dir === "EXPENSE") expenses += amt;
-    }
-
-    return {
-      income,
-      expenses,
-      savings: income - expenses,
-      toLabel: isoDate(to),
-    };
-  }, [allTxs, savingsFrom]);
-
   const savingsRate = useMemo(() => {
     if (!monthStats.income) return 0;
     return Math.max(0, Math.min(1, monthStats.savings / monthStats.income));
   }, [monthStats.income, monthStats.savings]);
+
+  function DonutChart(props: {
+    needsFill: number;
+    wantsFill: number;
+    savingsFill: number;
+    size?: number;
+  }) {
+    const size = props.size ?? 176;
+    const r = 58;
+    const stroke = 18;
+    const circ = 2 * Math.PI * r;
+
+    const segments = [
+      {
+        key: "needs",
+        pct: planNeedsPct,
+        fill: Math.max(0, Math.min(1, props.needsFill)),
+        color: "var(--warning)",
+      },
+      {
+        key: "wants",
+        pct: planWantsPct,
+        fill: Math.max(0, Math.min(1, props.wantsFill)),
+        color: "var(--info)",
+      },
+      {
+        key: "savings",
+        pct: planSavingsPct,
+        fill: Math.max(0, Math.min(1, props.savingsFill)),
+        color: "var(--success)",
+      },
+    ];
+
+    let startPct = 0;
+
+    const cx = size / 2;
+    const cy = size / 2;
+
+    return (
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ display: "block" }}>
+        <defs>
+          <filter id="donutShadow" x="-30%" y="-30%" width="160%" height="160%">
+            <feDropShadow dx="0" dy="2" stdDeviation="2" floodColor="rgba(15, 23, 42, 0.28)" />
+          </filter>
+        </defs>
+
+        <g transform={`translate(${cx} ${cy}) rotate(-90)`} filter="url(#donutShadow)">
+          {segments.map((s) => {
+            const segLen = (circ * s.pct) / 100;
+            const startLen = (circ * startPct) / 100;
+            startPct += s.pct;
+
+            const baseDash = `${segLen} ${circ - segLen}`;
+            const fillLen = segLen * s.fill;
+            const fillDash = `${fillLen} ${circ - fillLen}`;
+
+            return (
+              <g key={s.key}>
+                <circle
+                  r={r}
+                  cx={0}
+                  cy={0}
+                  fill="transparent"
+                  stroke={s.color}
+                  strokeOpacity={0.22}
+                  strokeWidth={stroke}
+                  strokeLinecap="round"
+                  strokeDasharray={baseDash}
+                  strokeDashoffset={-startLen}
+                />
+                <circle
+                  r={r}
+                  cx={0}
+                  cy={0}
+                  fill="transparent"
+                  stroke={s.color}
+                  strokeOpacity={0.85}
+                  strokeWidth={stroke}
+                  strokeLinecap="round"
+                  strokeDasharray={fillDash}
+                  strokeDashoffset={-startLen}
+                />
+              </g>
+            );
+          })}
+        </g>
+        <text x={cx} y={cy - 8} textAnchor="middle" fill="rgba(15, 23, 42, 0.72)" fontSize="11" fontWeight={900}>
+          Base
+        </text>
+        <text x={cx} y={cy + 16} textAnchor="middle" fill="rgba(15, 23, 42, 0.92)" fontSize="16" fontWeight={950}>
+          {showAmounts ? formatEUR(projectionStatsCotidiana.startBalance) : "••••"}
+        </text>
+        <text x={cx} y={cy + 34} textAnchor="middle" fill="rgba(15, 23, 42, 0.70)" fontSize="11" fontWeight={800}>
+          en la fecha
+        </text>
+      </svg>
+    );
+  }
 
   const recentTxs = useMemo(() => {
     const items = [...monthTxs];
@@ -277,126 +551,230 @@ export default function Dashboard() {
 
   return (
     <main className={styles.page}>
-      <header className={styles.topbar}>
-        <div className={styles.brand}>
-          <div className={styles.logo} aria-hidden="true">
-            <img
-              className={styles.logoImg}
-              src="/icono.png"
-              alt=""
-              onError={(e) => {
-                e.currentTarget.src = "/icon-192.png";
-              }}
-            />
-          </div>
-          <div className={styles.brandText}>
-            <h1 className={styles.appName}>FinanzApp</h1>
-            <p className={styles.kicker}>Mes {ym} · {email}</p>
-          </div>
-        </div>
-        <div className={styles.topActions}>
+      <AppTopBar
+        title="Dashboard"
+        icon="📊"
+        iconLabel="Dashboard"
+        showBack={false}
+        right={
           <button onClick={logout} className={styles.logout}>
             Cerrar sesión
           </button>
-        </div>
-      </header>
+        }
+      />
 
       <section className={styles.hero}>
         <div className={styles.heroRow}>
           <div>
             <h2 className={styles.heroHello}>Hola{loading ? "" : name ? `, ${name}` : ""}.</h2>
             <p className={styles.heroSub}>
-              Un vistazo rápido a tu dinero: saldo total, resumen del mes y movimientos recientes.
-            </p>
-          </div>
-
-          <div style={{ textAlign: "right" }}>
-            <p className={styles.heroMetricLabel}>Saldo total (actual)</p>
-            <div className={styles.heroMetricValue}>{loading ? "…" : formatEUR(totalBalance)}</div>
-            <p className={styles.heroSub}>
-              Ahorro del mes: <strong>{loading ? "…" : formatEUR(monthStats.savings)}</strong>
+              Un vistazo rápido a tu dinero y tu proyección.
             </p>
           </div>
         </div>
 
-        <div className={styles.kpiGrid}>
-          <div className={styles.kpi}>
-            <p className={styles.kpiLabel}>Ingresos (mes)</p>
-            <div className={`${styles.kpiValue} ${styles.kpiValuePositive}`}>{loading ? "…" : `+${formatEUR(monthStats.income)}`}</div>
+        <div className={styles.heroTabsRow}>
+          <div className={styles.heroTabs} role="tablist" aria-label="Panel principal">
+            <button
+              className={`${styles.heroTab} ${dashTab === "cotidiana" ? styles.heroTabActive : ""}`}
+              onClick={() => setDashTab("cotidiana")}
+              role="tab"
+              aria-selected={dashTab === "cotidiana"}
+              type="button"
+            >
+              Cotidiana
+            </button>
+            <button
+              className={`${styles.heroTab} ${dashTab === "balances" ? styles.heroTabActive : ""}`}
+              onClick={() => setDashTab("balances")}
+              role="tab"
+              aria-selected={dashTab === "balances"}
+              type="button"
+            >
+              Saldos
+            </button>
           </div>
-          <div className={styles.kpi}>
-            <p className={styles.kpiLabel}>Gastos fijos</p>
-            <div className={`${styles.kpiValue} ${styles.kpiValueNegative}`}>{loading ? "…" : `-${formatEUR(monthStats.fixedOut)}`}</div>
-          </div>
-          <div className={styles.kpi}>
-            <p className={styles.kpiLabel}>Gastos variables</p>
-            <div className={`${styles.kpiValue} ${styles.kpiValueNegative}`}>{loading ? "…" : `-${formatEUR(monthStats.variableOut)}`}</div>
-          </div>
-          <div className={styles.kpi}>
-            <p className={styles.kpiLabel}>Tasa de ahorro</p>
-            <div className={styles.kpiValue}>{loading ? "…" : `${Math.round(savingsRate * 100)}%`}</div>
-            <div className={styles.meter} aria-hidden="true">
-              <div className={styles.meterFill} style={{ width: `${Math.round((1 - savingsRate) * 100)}%` }} />
-            </div>
-          </div>
+
+          <button
+            className={styles.heroGhostButton}
+            onClick={() => setShowAmounts((v) => !v)}
+            aria-pressed={showAmounts}
+            title={showAmounts ? "Ocultar importes" : "Mostrar importes"}
+          >
+            {showAmounts ? "🙈 Ocultar" : "👁 Mostrar"}
+          </button>
         </div>
 
-        <div className={styles.rangeRow}>
-          <div>
-            <p className={styles.rangeLabel}>Ahorro desde</p>
-            <div className={styles.rangeControls}>
-              <input
-                className={styles.dateInput}
-                type="date"
-                value={savingsFrom}
-                max={isoDate(new Date())}
-                onChange={(e) => setSavingsFrom(e.target.value)}
-              />
-              <span className={styles.rangeHint}>hasta {loading ? "…" : rangeStats.toLabel}</span>
-            </div>
-          </div>
-          <div style={{ textAlign: "right" }}>
-            <p className={styles.rangeLabel}>Ahorro (rango)</p>
-            <div className={styles.rangeValue}>{loading ? "…" : formatEUR(rangeStats.savings)}</div>
-          </div>
+        <div className={styles.heroPanel} role="tabpanel">
+          {dashTab === "balances" ? (
+            loading ? (
+              <p style={{ marginTop: 12 }}>Cargando…</p>
+            ) : accountsLive.length === 0 ? (
+              <div style={{ marginTop: 12 }}>
+                <p style={{ margin: 0, opacity: 0.92 }}>Aún no tienes cuentas.</p>
+                <a className={styles.heroLink} href="/accounts">→ Crear mi primera cuenta</a>
+              </div>
+            ) : (
+              <>
+                <div className={styles.heroCotidianaHeaderRow}>
+                  <div>
+                    <p className={styles.heroMetricLabel} style={{ margin: 0 }}>
+                      Saldo total (actual)
+                    </p>
+                    <div className={styles.heroCotidianaBalance}>{showAmounts ? formatEUR(totalBalance) : "••••"}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <p className={styles.heroMetricLabel} style={{ margin: 0 }}>
+                      Ahorro del mes
+                    </p>
+                    <div className={styles.heroCotidianaBalanceSmall}>
+                      {showAmounts ? formatEUR(monthStats.savings) : "••••"}
+                    </div>
+                  </div>
+                </div>
+
+                <div className={styles.heroList}>
+                {accountsLive.slice(0, 6).map((a) => (
+                  <div key={a.id} className={styles.heroListItem}>
+                    <div className={styles.heroListMain}>
+                      <p className={styles.heroListTitle}>{a.name}</p>
+                      <p className={styles.heroListMeta}>
+                        Inicial {showAmounts ? formatEUR(Number(a.current_balance || 0)) : "••••"} · Mov {a.delta >= 0 ? "+" : ""}
+                        {showAmounts ? formatEUR(a.delta) : "••••"}
+                      </p>
+                    </div>
+                    <div className={styles.heroListAmount}>{showAmounts ? formatEUR(a.live_balance) : "••••"}</div>
+                  </div>
+                ))}
+
+                <div className={styles.heroListFooter}>
+                  <p className={styles.heroListMeta} style={{ margin: 0 }}>
+                    Total: <strong>{showAmounts ? formatEUR(totalBalance) : "••••"}</strong>
+                  </p>
+                  <a className={styles.heroLink} href="/accounts">→ Ver todas</a>
+                </div>
+              </div>
+              </>
+            )
+          ) : dashTab === "cotidiana" ? (
+            loading ? (
+              <p style={{ marginTop: 12 }}>Cargando…</p>
+            ) : accountsLiveCotidiana.length === 0 ? (
+              <div style={{ marginTop: 12 }}>
+                <p style={{ margin: 0, opacity: 0.92 }}>
+                  No hay cuentas de tipo <strong>Cotidiana</strong>.
+                </p>
+                <a className={styles.heroLink} href="/accounts">→ Crear/editar cuentas</a>
+              </div>
+            ) : (
+              <>
+                <div className={styles.heroCotidianaHeaderRow}>
+                  <div>
+                    <p className={styles.heroMetricLabel} style={{ margin: 0 }}>
+                      Saldo Cotidiana (actual)
+                    </p>
+                    <div className={styles.heroCotidianaBalance}>{showAmounts ? formatEUR(totalBalanceCotidiana) : "••••"}</div>
+                  </div>
+                </div>
+
+                <div className={styles.heroConfigSummary}>
+                  <p className={styles.heroConfigSummaryTitle}>Proyección (1 mes)</p>
+                  <div className={styles.heroConfigActions}>
+                    <div className={styles.rangeControls}>
+                      <input
+                        className={styles.dateInput}
+                        type="date"
+                        value={projectionFrom}
+                        max={isoDate(new Date())}
+                        onChange={(e) => setProjectionFrom(e.target.value)}
+                      />
+                      <span className={styles.rangeHint}>hasta {projectionStatsCotidiana.toLabel || "…"}</span>
+                    </div>
+                    <a className={styles.heroLink} href="/settings">
+                      → Ajustar plan
+                    </a>
+                  </div>
+
+                  <div className={styles.projectionLayout}>
+                    <div className={styles.donutCard}>
+                      <DonutChart
+                        size={190}
+                        needsFill={projectionStatsCotidiana.needsRatio}
+                        wantsFill={projectionStatsCotidiana.wantsRatio}
+                        savingsFill={projectionStatsCotidiana.savingsRatio}
+                      />
+                    </div>
+
+                    <div style={{ display: "grid", gap: 10 }}>
+                      <div>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                          <strong>Necesidades</strong>
+                          <span>
+                            {showAmounts
+                              ? `${formatEUR(projectionStatsCotidiana.needsOut)} / ${formatEUR(projectionStatsCotidiana.plannedNeeds)}`
+                              : "••••"}
+                          </span>
+                        </div>
+                        <div className={styles.heroMeter} aria-hidden="true">
+                          <div
+                            className={styles.heroMeterFill}
+                            style={{
+                              width: `${Math.min(100, Math.max(0, Math.round(projectionStatsCotidiana.needsRatio * 100)))}%`,
+                              background: "var(--warning)",
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                          <strong>Ocio</strong>
+                          <span>
+                            {showAmounts
+                              ? `${formatEUR(projectionStatsCotidiana.wantsOut)} / ${formatEUR(projectionStatsCotidiana.plannedWants)}`
+                              : "••••"}
+                          </span>
+                        </div>
+                        <div className={styles.heroMeter} aria-hidden="true">
+                          <div
+                            className={styles.heroMeterFill}
+                            style={{
+                              width: `${Math.min(100, Math.max(0, Math.round(projectionStatsCotidiana.wantsRatio * 100)))}%`,
+                              background: "var(--info)",
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                          <strong>Ahorro</strong>
+                          <span>
+                            {showAmounts
+                              ? `${formatEUR(projectionStatsCotidiana.savings)} / ${formatEUR(projectionStatsCotidiana.plannedSavings)}`
+                              : "••••"}
+                          </span>
+                        </div>
+                        <div className={styles.heroMeter} aria-hidden="true">
+                          <div
+                            className={styles.heroMeterFill}
+                            style={{
+                              width: `${Math.min(100, Math.max(0, Math.round(projectionStatsCotidiana.savingsRatio * 100)))}%`,
+                              background: "var(--success)",
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )
+          ) : null}
         </div>
       </section>
 
-      <div className={styles.grid}>
-        <section className={styles.card}>
-          <h3 className={styles.cardTitle}>Cuentas</h3>
-          <p className={styles.cardSub}>Saldo actual por cuenta (saldo inicial + movimientos)</p>
-
-          {loading ? (
-            <p style={{ marginTop: 12 }}>Cargando…</p>
-          ) : accountsLive.length === 0 ? (
-            <div style={{ marginTop: 12 }}>
-              <p>Aún no tienes cuentas.</p>
-              <a className={styles.smallLink} href="/accounts">→ Crear mi primera cuenta</a>
-            </div>
-          ) : (
-            <div className={styles.list}>
-              {accountsLive.slice(0, 6).map((a) => (
-                <div key={a.id} className={styles.listItem}>
-                  <div className={styles.listMain}>
-                    <p className={styles.listTitle}>{a.name}</p>
-                    <p className={styles.listMeta}>
-                      Inicial {formatEUR(Number(a.current_balance || 0))} · Mov {a.delta >= 0 ? "+" : ""}{formatEUR(a.delta)}
-                    </p>
-                  </div>
-                  <div
-                    className={`${styles.amount} ${a.live_balance >= 0 ? styles.amountIn : styles.amountOut}`}
-                  >
-                    {formatEUR(a.live_balance)}
-                  </div>
-                </div>
-              ))}
-
-              <a className={styles.smallLink} href="/accounts">→ Ver todas</a>
-            </div>
-          )}
-        </section>
-
+      <div className={styles.gridSingle}>
         <section className={styles.card}>
           <h3 className={styles.cardTitle}>Acciones rápidas</h3>
           <p className={styles.cardSub}>Lo que más vas a usar día a día</p>
@@ -413,13 +791,23 @@ export default function Dashboard() {
               </a>
             </div>
             <div className={styles.actionRow}>
+              <a className={styles.action} href="/accounts">
+                <p className={styles.actionTitle}>🏦 Cuentas</p>
+                <p className={styles.actionDesc}>Crear y ajustar cuentas</p>
+              </a>
               <a className={styles.action} href="/categories">
                 <p className={styles.actionTitle}>🏷️ Categorías</p>
-                <p className={styles.actionDesc}>Crear y ajustar categorías</p>
+                <p className={styles.actionDesc}>Crear y ajustar plantillas</p>
               </a>
+            </div>
+            <div className={styles.actionRow}>
               <a className={styles.action} href="/monthly">
                 <p className={styles.actionTitle}>📅 Mensual</p>
                 <p className={styles.actionDesc}>Detalle y cierre del mes</p>
+              </a>
+              <a className={styles.action} href="/settings">
+                <p className={styles.actionTitle}>⚙️ Ajustes</p>
+                <p className={styles.actionDesc}>Plan y contraseña</p>
               </a>
             </div>
           </div>

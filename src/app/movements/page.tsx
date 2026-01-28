@@ -6,11 +6,15 @@ import { useRequireSupabaseConfigured } from "@/lib/useRequireSupabaseConfigured
 import { humanizeSupabaseSchemaError } from "@/lib/supabaseErrorMessage";
 import {
   VARIABLE_EXPENSE_NAME,
+  VARIABLE_EXPENSE_NEEDS_NAME,
+  VARIABLE_EXPENSE_WANTS_NAME,
   VARIABLE_INCOME_NAME,
+  isInternalCategoryName,
   isInternalVariableCategoryName,
 } from "@/lib/internalCategories";
 import { formatEUR } from "@/lib/format";
-import type { Account, Category, CategoryJoin, AccountJoin, OneOrMany, Direction } from "@/lib/types";
+import type { Account, BudgetBucket, Category, CategoryJoin, AccountJoin, OneOrMany, Direction } from "@/lib/types";
+import { AppTopBar } from "@/app/ui/AppTopBar";
 
 type VariableDirection = Direction;
 
@@ -76,6 +80,7 @@ export default function MovementsPage() {
   const [accountId, setAccountId] = useState<string>("");
   const [amountStr, setAmountStr] = useState<string>("");
   const [direction, setDirection] = useState<VariableDirection>("EXPENSE");
+  const [expenseBucket, setExpenseBucket] = useState<BudgetBucket>("NEEDS");
   const [description, setDescription] = useState<string>("");
   const [headerDate, setHeaderDate] = useState<string>(currentISODate());
 
@@ -95,7 +100,7 @@ export default function MovementsPage() {
         .order("created_at"),
       supabase
         .from("categories")
-        .select("id,name,direction,amount")
+        .select("id,name,direction,amount,budget_bucket")
         .eq("user_id", userId)
         .order("created_at"),
     ]);
@@ -112,16 +117,23 @@ export default function MovementsPage() {
     if (!accountId && accs[0]?.id) setAccountId(accs[0].id);
   }
 
-  async function ensureVariableCategoryId(dir: "INCOME" | "EXPENSE") {
+  async function ensureVariableCategoryId(dir: "INCOME" | "EXPENSE", bucket?: BudgetBucket) {
     if (!supabase) return null;
     const { data: session } = await supabase.auth.getSession();
     const userId = session?.session?.user?.id;
     if (!userId) return null;
 
-    const name = dir === "INCOME" ? VARIABLE_INCOME_NAME : VARIABLE_EXPENSE_NAME;
+    const name =
+      dir === "INCOME"
+        ? VARIABLE_INCOME_NAME
+        : bucket === "WANTS"
+          ? VARIABLE_EXPENSE_WANTS_NAME
+          : bucket === "NEEDS"
+            ? VARIABLE_EXPENSE_NEEDS_NAME
+            : VARIABLE_EXPENSE_NAME;
     const { data, error } = await supabase
       .from("categories")
-      .select("id,name,direction,amount")
+      .select("id,name,direction,amount,budget_bucket")
       .eq("user_id", userId)
       .eq("name", name)
       .maybeSingle();
@@ -135,6 +147,7 @@ export default function MovementsPage() {
       name,
       direction: dir,
       amount: 0.01,
+      budget_bucket: dir === "EXPENSE" ? (bucket ?? "NEEDS") : null,
     });
     if (ins.error) return null;
 
@@ -185,7 +198,7 @@ export default function MovementsPage() {
       .select(`
         id, ym, tx_date, description, amount, account_id, category_id, transfer_group_id, created_at,
         accounts:accounts(name),
-        categories:categories(name, direction, amount)
+        categories:categories(name, direction, amount, budget_bucket)
       `)
       .eq("ym", ym)
       .order("tx_date", { ascending: true, nullsFirst: false })
@@ -215,8 +228,15 @@ export default function MovementsPage() {
     const { data: session } = await supabase.auth.getSession();
     if (!session?.session?.user?.id) return alert("No autenticado");
 
-    const variableCategoryId = await ensureVariableCategoryId(direction);
-    if (!variableCategoryId) return alert("No se pudo preparar la categoría de movimiento variable.");
+    if (direction === "EXPENSE" && !expenseBucket) {
+      return alert("Selecciona si es Necesidades u Ocio.");
+    }
+
+    const variableCategoryId = await ensureVariableCategoryId(
+      direction,
+      direction === "EXPENSE" ? expenseBucket : undefined
+    );
+    if (!variableCategoryId) return alert("No se pudo preparar la categoría del movimiento.");
 
     const { error } = await supabase.from("transactions").insert({
       ym,
@@ -275,7 +295,7 @@ export default function MovementsPage() {
 
   const fixedTemplates = useMemo(() => {
     const list = categories
-      .filter((c) => Number(c.amount ?? 0) > 0 && c.name !== VARIABLE_EXPENSE_NAME && c.name !== VARIABLE_INCOME_NAME)
+      .filter((c) => Number(c.amount ?? 0) > 0 && !isInternalCategoryName(c.name))
       .slice();
     list.sort((a, b) => a.direction.localeCompare(b.direction) || a.name.localeCompare(b.name));
     return list;
@@ -285,10 +305,7 @@ export default function MovementsPage() {
 
   return (
     <main style={{ maxWidth: 1100, margin: "0 auto", padding: "3rem 2rem" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2rem" }}>
-        <h1>📝 Movimientos</h1>
-        <a href="/dashboard" style={{ color: "var(--primary)", fontWeight: "600" }}>← Volver</a>
-      </div>
+      <AppTopBar title="Movimientos" icon="📝" iconLabel="Movimientos" backHref="/dashboard" />
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.5rem", marginBottom: "2rem" }}>
         <div style={{ background: "linear-gradient(135deg, var(--success) 0%, #34d399 100%)", color: "white", padding: "1.5rem", borderRadius: "0.75rem", boxShadow: "var(--shadow-md)" }}>
@@ -355,15 +372,15 @@ export default function MovementsPage() {
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.25rem", marginBottom: "1.5rem" }}>
           <div style={{ padding: "1.25rem", borderRadius: "0.75rem", background: "var(--surface-hover)", border: "1px solid var(--border)" }}>
-            <h4 style={{ marginBottom: "0.75rem" }}>⚡ Fijos (rápido)</h4>
+            <h4 style={{ marginBottom: "0.75rem" }}>⚡ Plantillas (rápido)</h4>
             {fixedTemplates.length === 0 ? (
               <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: "0.9rem" }}>
-                No hay plantillas fijas. Crea categorías con importe en <a href="/categories">Categorías</a>.
+                No hay plantillas. Crea categorías con importe en <a href="/categories">Categorías</a>.
               </p>
             ) : (
               <>
                 <p style={{ marginTop: 0, color: "var(--text-secondary)", fontSize: "0.9rem" }}>
-                  Pulsa para añadir un movimiento fijo a la cuenta seleccionada.
+                  Pulsa para añadir un movimiento desde una plantilla a la cuenta seleccionada.
                 </p>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem" }}>
                   {fixedTemplates.map((t) => {
@@ -390,7 +407,7 @@ export default function MovementsPage() {
           </div>
 
           <div style={{ padding: "1.25rem", borderRadius: "0.75rem", background: "var(--surface-hover)", border: "1px solid var(--border)" }}>
-            <h4 style={{ marginBottom: "0.75rem" }}>✍️ Variable (configurable)</h4>
+            <h4 style={{ marginBottom: "0.75rem" }}>✍️ Movimiento manual</h4>
             {accounts.length === 0 ? (
               <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: "0.9rem" }}>
                 Necesitas una cuenta para crear movimientos.
@@ -400,7 +417,7 @@ export default function MovementsPage() {
                 Necesitas categorías para crear movimientos.
               </p>
             ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr auto", gap: "1rem" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr auto", gap: "1rem" }}>
                 <input
                   placeholder="Descripción (Supermercado, Cena, Extra...)"
                   value={description}
@@ -410,6 +427,16 @@ export default function MovementsPage() {
                 <select value={direction} onChange={(e) => setDirection(e.target.value as any)} title="Gasto o ingreso">
                   <option value="EXPENSE">📤 Gasto</option>
                   <option value="INCOME">📥 Ingreso</option>
+                </select>
+
+                <select
+                  value={expenseBucket}
+                  onChange={(e) => setExpenseBucket(e.target.value as any)}
+                  disabled={direction !== "EXPENSE"}
+                  title="Solo aplica a gastos"
+                >
+                  <option value="NEEDS">Necesidades</option>
+                  <option value="WANTS">Ocio</option>
                 </select>
 
                 <input
@@ -469,7 +496,16 @@ export default function MovementsPage() {
                 const cat = Array.isArray(t.categories) ? t.categories[0] : t.categories;
                 const acc = Array.isArray(t.accounts) ? t.accounts[0] : t.accounts;
                 const rawCatName = cat?.name ?? "—";
-                const catName = isInternalVariableCategoryName(rawCatName) ? "Variable" : rawCatName;
+                const catName =
+                  rawCatName === VARIABLE_EXPENSE_NEEDS_NAME
+                    ? "Necesidades"
+                    : rawCatName === VARIABLE_EXPENSE_WANTS_NAME
+                      ? "Ocio"
+                      : rawCatName === VARIABLE_INCOME_NAME
+                        ? "Ingreso"
+                        : isInternalVariableCategoryName(rawCatName)
+                          ? "Movimiento"
+                          : rawCatName;
                 const accName = acc?.name ?? "?";
                 const isTransfer = Boolean(t.transfer_group_id);
                 const isIncome = cat?.direction === "INCOME";
@@ -480,7 +516,7 @@ export default function MovementsPage() {
                   t.description &&
                   String(t.description).trim() === String(cat.name).trim() &&
                   Number(cat.amount ?? NaN) === amt;
-                const chipLabel = isTransfer ? "Transferencia" : isFixed ? catName : catName === "Variable" ? "Variable" : `${catName} (var)`;
+                const chipLabel = isTransfer ? "Transferencia" : catName;
 
                 return (
                   <tr key={t.id}>

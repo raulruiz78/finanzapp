@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase, supabaseConfigured } from "@/lib/supabase";
 import { useRequireSupabaseConfigured } from "@/lib/useRequireSupabaseConfigured";
-import type { Account, CategoryJoin, OneOrMany } from "@/lib/types";
+import type { Account, AccountType, CategoryJoin, OneOrMany } from "@/lib/types";
+import { AppTopBar } from "@/app/ui/AppTopBar";
 
 type TxForBalance = {
   account_id: string;
@@ -16,7 +17,14 @@ export default function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [deltaByAccount, setDeltaByAccount] = useState<Record<string, number>>({});
   const [name, setName] = useState("");
+  const [accountType, setAccountType] = useState<AccountType>("COTIDIANA");
   const [balance, setBalance] = useState<string>("0");
+
+  function labelAccountType(t?: AccountType | null) {
+    if (t === "AHORRO") return "Ahorro";
+    if (t === "EXTRA") return "Extra";
+    return "Cotidiana";
+  }
 
   function parseNonNegativeMoney(raw: string): number | null {
     const normalized = String(raw ?? "")
@@ -42,7 +50,7 @@ export default function AccountsPage() {
     const [{ data: acc, error: accErr }, { data: tx, error: txErr }] = await Promise.all([
       supabase
         .from("accounts")
-        .select("id,name,current_balance")
+        .select("id,name,account_type,current_balance")
         .eq("user_id", userId)
         .order("created_at"),
       supabase
@@ -80,6 +88,7 @@ export default function AccountsPage() {
 
     const { error } = await supabase.from("accounts").insert({
       name,
+      account_type: accountType,
       current_balance: parsedBalance,
       user_id: session.session.user.id,
     });
@@ -87,6 +96,7 @@ export default function AccountsPage() {
     if (error) return alert(error.message);
 
     setName("");
+    setAccountType("COTIDIANA");
     setBalance("0");
     loadAccounts();
   }
@@ -125,10 +135,7 @@ export default function AccountsPage() {
 
   return (
     <main style={{ maxWidth: 900, margin: "0 auto", padding: "3rem 2rem" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2rem" }}>
-        <h1>🏦 Mis Cuentas</h1>
-        <a href="/dashboard" style={{ color: "var(--primary)", fontWeight: "600" }}>← Volver</a>
-      </div>
+      <AppTopBar title="Cuentas" icon="🏦" iconLabel="Cuentas" backHref="/dashboard" />
 
       <section style={{ background: "linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%)", color: "white", marginBottom: "2rem" }}>
         <div style={{ padding: "2rem" }}>
@@ -141,7 +148,7 @@ export default function AccountsPage() {
 
       <section style={{ marginBottom: "2rem" }}>
         <h3 style={{ marginBottom: "1.5rem" }}>➕ Nueva Cuenta</h3>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: "1rem", alignItems: "flex-end" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: "1rem", alignItems: "flex-end" }}>
           <div>
             <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "600", marginBottom: "0.5rem", color: "var(--foreground)" }}>
               Nombre
@@ -167,6 +174,20 @@ export default function AccountsPage() {
               onChange={(e) => setBalance(e.target.value)}
               style={{ width: "100%" }}
             />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "600", marginBottom: "0.5rem", color: "var(--foreground)" }}>
+              Tipo
+            </label>
+            <select
+              value={accountType}
+              onChange={(e) => setAccountType(e.target.value as AccountType)}
+              style={{ width: "100%" }}
+            >
+              <option value="AHORRO">Ahorro (fondo ahorrado)</option>
+              <option value="COTIDIANA">Cotidiana (gastos diarios)</option>
+              <option value="EXTRA">Extra (cuenta externa)</option>
+            </select>
           </div>
           <button onClick={createAccount} style={{ background: "linear-gradient(135deg, var(--success) 0%, #34d399 100%)", color: "white" }}>
             ✅ Crear
@@ -207,6 +228,22 @@ export default function AccountsPage() {
               >
                 <div style={{ fontSize: "2.5rem", marginBottom: "1rem" }}>🏦</div>
                 <h4 style={{ marginBottom: "0.75rem", fontSize: "1.1rem" }}>{a.name}</h4>
+                <div style={{ marginBottom: "1rem" }}>
+                  <span
+                    style={{
+                      display: "inline-block",
+                      padding: "0.25rem 0.5rem",
+                      borderRadius: "999px",
+                      fontSize: "0.75rem",
+                      fontWeight: 700,
+                      background: "var(--surface-2)",
+                      border: "1px solid var(--border)",
+                      color: "var(--foreground)",
+                    }}
+                  >
+                    {labelAccountType((a as any).account_type)}
+                  </span>
+                </div>
                 <div style={{ marginBottom: "1rem" }}>
                   <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginBottom: "0.25rem" }}>Saldo actual</p>
                   <p style={{ fontSize: "1.5rem", fontWeight: "700", color: a.live_balance >= 0 ? "var(--success)" : "var(--danger)" }}>

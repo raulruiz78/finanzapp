@@ -103,6 +103,346 @@
   color: rgba(255, 255, 255, 0.92);
 }
 
+.heroTabsRow {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.heroTabs {
+  display: flex;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.heroTab {
+  border-radius: 12px;
+  border: 1px solid transparent;
+  padding: 10px 12px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.88);
+  font-weight: 800;
+}
+
+.heroTab:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
+}
+
+.heroTabActive {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: white;
+}
+
+.heroGhostButton {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: white;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.heroGhostButton:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.heroPanel {
+  margin-top: 12px;
+}
+
+.heroPrimaryButton {
+  background: rgba(255, 255, 255, 0.90);
+  color: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-weight: 800;
+}
+
+.heroPrimaryButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.heroConfigIntro {
+  margin: 10px 0 0 0;
+  color: rgba(255, 255, 255, 0.92);
+  opacity: 0.95;
+}
+
+.heroConfigGrid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 980px) {
+  .heroConfigGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.heroConfigField {
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.heroConfigLabel {
+  display: block;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.86);
+  font-weight: 700;
+}
+
+.heroConfigInput {
+  margin-top: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.10);
+  color: white;
+  outline: none;
+}
+
+.heroConfigInput:focus {
+  border-color: rgba(255, 255, 255, 0.40);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.14);
+}
+
+.heroConfigActions {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.heroConfigError {
+  margin: 10px 0 0 0;
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 700;
+}
+
+.heroConfigSummary {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.heroConfigSummaryTitle {
+  margin: 0;
+  font-weight: 900;
+  color: white;
+}
+
+.heroConfigSummaryLine {
+  margin: 8px 0 0 0;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.heroConfigChips {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.heroChip {
+  display: inline-block;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: white;
+  font-weight: 800;
+  font-size: 0.85rem;
+}
+
+.heroLink {
+  display: inline-block;
+  margin-top: 8px;
+  color: rgba(255, 255, 255, 0.96);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.heroList {
+  margin-top: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.heroListItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.heroListMain {
+  min-width: 0;
+}
+
+.heroListTitle {
+  margin: 0;
+  font-weight: 900;
+  color: white;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.heroListMeta {
+  margin: 4px 0 0 0;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.heroListAmount {
+  font-weight: 900;
+  color: white;
+  white-space: nowrap;
+}
+
+.heroListFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 4px 0;
+}
+
+.heroCotidianaHeaderRow {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.heroCotidianaBalance {
+  margin-top: 6px;
+  font-weight: 900;
+  font-size: 1.8rem;
+  letter-spacing: -0.02em;
+  color: white;
+}
+
+.heroCotidianaBalanceSmall {
+  margin-top: 6px;
+  font-weight: 900;
+  font-size: 1.2rem;
+  color: white;
+}
+
+.heroKpiGrid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 980px) {
+  .heroKpiGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .heroKpiGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.heroKpi {
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.heroKpiLabel {
+  margin: 0;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.heroKpiValue {
+  margin-top: 6px;
+  font-weight: 900;
+  font-size: 1.2rem;
+  color: white;
+}
+
+.heroKpiValuePositive {
+  margin-top: 6px;
+  font-weight: 900;
+  font-size: 1.2rem;
+  color: #34d399;
+}
+
+.heroKpiValueNegative {
+  margin-top: 6px;
+  font-weight: 900;
+  font-size: 1.2rem;
+  color: #fb7185;
+}
+
+.heroMeter {
+  margin-top: 10px;
+  height: 10px;
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.heroMeterFill {
+  height: 100%;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+
+.projectionLayout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 14px;
+  align-items: start;
+  margin-top: 12px;
+}
+
+@media (max-width: 980px) {
+  .projectionLayout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.donutCard {
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 16px;
+  padding: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.14);
+}
 .heroMetricLabel {
   margin: 0;
   font-size: 0.9rem;
@@ -175,6 +515,12 @@
   gap: 16px;
 }
 
+.gridSingle {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
 @media (max-width: 980px) {
   .grid {
     grid-template-columns: 1fr;
@@ -199,6 +545,97 @@
   margin: 6px 0 0 0;
   color: var(--text-secondary);
   font-size: 0.9rem;
+}
+
+.cardHeadRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ghostButton {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--foreground);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.ghostButton:hover {
+  background: var(--surface-hover);
+}
+
+.tabs {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+}
+
+.tab {
+  flex: 1;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  padding: 10px 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
+.tab:hover {
+  background: rgba(15, 23, 42, 0.04);
+  color: var(--foreground);
+}
+
+.tabActive {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--foreground);
+  box-shadow: var(--shadow);
+}
+
+.tabPanel {
+  margin-top: 12px;
+}
+
+.listFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 10px;
+}
+
+.listFooterLeft {
+  min-width: 0;
+}
+
+.cotidianaHeaderRow {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.cotidianaBalance {
+  margin-top: 6px;
+  font-weight: 900;
+  font-size: 1.8rem;
+  letter-spacing: -0.02em;
+  color: var(--foreground);
+}
+
+.cotidianaBalanceSmall {
+  margin-top: 6px;
+  font-weight: 900;
+  font-size: 1.2rem;
+  color: var(--foreground);
 }
 
 .kpiGrid {
