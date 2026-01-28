@@ -28,7 +28,7 @@ export default function CategoriesPage() {
   function normalizeName(raw: string) {
     return raw
       .trim()
-        <AppTopBar title="Categorías" icon="🏷️" iconLabel="Categorías" backHref="/dashboard" />
+      .toLowerCase()
       .normalize("NFD")
       .replace(/\p{Diacritic}/gu, "");
   }
